@@ -44,10 +44,13 @@ class LiteLLMModel(OpenAIModel):
             params: Model parameters (e.g., max_tokens).
                 For a complete list of supported parameters, see
                 https://docs.litellm.ai/docs/completion/input#input-params-1.
+            context_window_limit: Maximum context window size in tokens for the model.
+                This value represents the total token capacity shared between input and output.
         """
 
         model_id: str
         params: dict[str, Any] | None
+        context_window_limit: int | None
 
     def __init__(self, client_args: dict[str, Any] | None = None, **model_config: Unpack[LiteLLMConfig]) -> None:
         """Initialize provider instance.

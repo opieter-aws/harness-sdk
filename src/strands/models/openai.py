@@ -62,10 +62,13 @@ class OpenAIModel(Model):
             params: Model parameters (e.g., max_tokens).
                 For a complete list of supported parameters, see
                 https://platform.openai.com/docs/api-reference/chat/create.
+            context_window_limit: Maximum context window size in tokens for the model.
+                This value represents the total token capacity shared between input and output.
         """
 
         model_id: str
         params: dict[str, Any] | None
+        context_window_limit: int | None
 
     def __init__(
         self,

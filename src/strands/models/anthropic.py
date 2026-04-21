@@ -56,11 +56,14 @@ class AnthropicModel(Model):
                 https://docs.anthropic.com/en/docs/about-claude/models/all-models.
             params: Additional model parameters (e.g., temperature).
                 For a complete list of supported parameters, see https://docs.anthropic.com/en/api/messages.
+            context_window_limit: Maximum context window size in tokens for the model.
+                This value represents the total token capacity shared between input and output.
         """
 
         max_tokens: Required[int]
         model_id: Required[str]
         params: dict[str, Any] | None
+        context_window_limit: int | None
 
     def __init__(self, *, client_args: dict[str, Any] | None = None, **model_config: Unpack[AnthropicConfig]):
         """Initialize provider instance.

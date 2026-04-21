@@ -134,11 +134,14 @@ class OpenAIResponsesModel(Model):
             stateful: Whether to enable server-side conversation state management.
                 When True, the server stores conversation history and the client does not need to
                 send the full message history with each request. Defaults to False.
+            context_window_limit: Maximum context window size in tokens for the model.
+                This value represents the total token capacity shared between input and output.
         """
 
         model_id: str
         params: dict[str, Any] | None
         stateful: bool
+        context_window_limit: int | None
 
     def __init__(
         self, client_args: dict[str, Any] | None = None, **model_config: Unpack[OpenAIResponsesConfig]

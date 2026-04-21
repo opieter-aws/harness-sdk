@@ -45,6 +45,8 @@ class OllamaModel(Model):
             stop_sequences: List of sequences that will stop generation when encountered.
             temperature: Controls randomness in generation (higher = more random).
             top_p: Controls diversity via nucleus sampling (alternative to temperature).
+            context_window_limit: Maximum context window size in tokens for the model.
+                This value represents the total token capacity shared between input and output.
         """
 
         additional_args: dict[str, Any] | None
@@ -55,6 +57,7 @@ class OllamaModel(Model):
         stop_sequences: list[str] | None
         temperature: float | None
         top_p: float | None
+        context_window_limit: int | None
 
     def __init__(
         self,

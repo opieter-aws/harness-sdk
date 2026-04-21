@@ -48,11 +48,14 @@ class GeminiModel(Model):
                 Use the standard tools interface for function calling tools.
                 For a complete list of supported tools, see
                 https://ai.google.dev/api/caching#Tool
+            context_window_limit: Maximum context window size in tokens for the model.
+                This value represents the total token capacity shared between input and output.
         """
 
         model_id: Required[str]
         params: dict[str, Any]
         gemini_tools: list[genai.types.Tool]
+        context_window_limit: int | None
 
     def __init__(
         self,

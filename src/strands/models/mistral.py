@@ -45,6 +45,8 @@ class MistralModel(Model):
             temperature: Controls randomness in generation (0.0 to 1.0).
             top_p: Controls diversity via nucleus sampling.
             stream: Whether to enable streaming responses.
+            context_window_limit: Maximum context window size in tokens for the model.
+                This value represents the total token capacity shared between input and output.
         """
 
         model_id: str
@@ -52,6 +54,7 @@ class MistralModel(Model):
         temperature: float | None
         top_p: float | None
         stream: bool | None
+        context_window_limit: int | None
 
     def __init__(
         self,

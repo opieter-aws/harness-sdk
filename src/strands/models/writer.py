@@ -39,6 +39,8 @@ class WriterModel(Model):
             stream_options: Additional options for streaming.
             temperature: What sampling temperature to use.
             top_p: Threshold for 'nucleus sampling'
+            context_window_limit: Maximum context window size in tokens for the model.
+                This value represents the total token capacity shared between input and output.
         """
 
         model_id: str
@@ -47,6 +49,7 @@ class WriterModel(Model):
         stream_options: dict[str, Any]
         temperature: float | None
         top_p: float | None
+        context_window_limit: int | None
 
     def __init__(self, client_args: dict[str, Any] | None = None, **model_config: Unpack[WriterConfig]):
         """Initialize provider instance.

@@ -101,6 +101,8 @@ class BedrockModel(Model):
             streaming: Flag to enable/disable streaming. Defaults to True.
             temperature: Controls randomness in generation (higher = more random)
             top_p: Controls diversity via nucleus sampling (alternative to temperature)
+            context_window_limit: Maximum context window size in tokens for the model.
+                This value represents the total token capacity shared between input and output.
         """
 
         additional_args: dict[str, Any] | None
@@ -109,6 +111,7 @@ class BedrockModel(Model):
         cache_prompt: str | None
         cache_config: CacheConfig | None
         cache_tools: str | None
+        context_window_limit: int | None
         guardrail_id: str | None
         guardrail_trace: Literal["enabled", "disabled", "enabled_full"] | None
         guardrail_stream_processing_mode: Literal["sync", "async"] | None

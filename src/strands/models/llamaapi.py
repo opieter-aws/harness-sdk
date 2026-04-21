@@ -41,6 +41,8 @@ class LlamaAPIModel(Model):
             top_p: Top-p.
             max_completion_tokens: Maximum completion tokens.
             top_k: Top-k.
+            context_window_limit: Maximum context window size in tokens for the model.
+                This value represents the total token capacity shared between input and output.
         """
 
         model_id: str
@@ -49,6 +51,7 @@ class LlamaAPIModel(Model):
         top_p: float | None
         max_completion_tokens: int | None
         top_k: int | None
+        context_window_limit: int | None
 
     def __init__(
         self,

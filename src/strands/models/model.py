@@ -51,6 +51,16 @@ class Model(abc.ABC):
         """
         return False
 
+    @property
+    def context_window_limit(self) -> int | None:
+        """Maximum context window size in tokens, or None if not configured."""
+        config = self.get_config()
+        return (
+            config.get("context_window_limit")
+            if isinstance(config, dict)
+            else getattr(config, "context_window_limit", None)
+        )
+
     @abc.abstractmethod
     # pragma: no cover
     def update_config(self, **model_config: Any) -> None:

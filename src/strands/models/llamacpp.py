@@ -126,10 +126,13 @@ class LlamaCppModel(Model):
                 - cache_prompt: Cache the prompt for faster generation
                 - slot_id: Slot ID for parallel inference
                 - samplers: Custom sampler order
+            context_window_limit: Maximum context window size in tokens for the model.
+                This value represents the total token capacity shared between input and output.
         """
 
         model_id: str
         params: dict[str, Any] | None
+        context_window_limit: int | None
 
     def __init__(
         self,

@@ -124,6 +124,8 @@ class SageMakerAIModel(OpenAIModel):
             inference_component_name: The name of the inference component to use
 
             additional_args: Other request parameters, as supported by https://bit.ly/sagemaker-invoke-endpoint-params
+            context_window_limit: Maximum context window size in tokens for the model.
+                This value represents the total token capacity shared between input and output.
         """
 
         endpoint_name: str
@@ -132,6 +134,7 @@ class SageMakerAIModel(OpenAIModel):
         target_model: str | None | None
         target_variant: str | None | None
         additional_args: dict[str, Any] | None
+        context_window_limit: int | None
 
     def __init__(
         self,
