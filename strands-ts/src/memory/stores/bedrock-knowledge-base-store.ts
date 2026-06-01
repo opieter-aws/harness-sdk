@@ -17,6 +17,16 @@ import type { JSONValue } from '../../types/json.js'
 export interface BedrockKnowledgeBaseStoreConfig extends MemoryStoreConfig {
   knowledgeBaseId: string
   /**
+   * The kind of backend this knowledge base is. Only `'custom'` data sources accept direct
+   * document ingestion (`IngestKnowledgeBaseDocuments`), so only a `'custom'` store can be written
+   * to. `'managed'` sources (S3, Confluence, SharePoint, Salesforce, Web) ingest by syncing from an
+   * external store, and `'structured'` stores (SQL/Redshift) are query-only — neither can `add`.
+   *
+   * Effective writability is `writable && kind === 'custom'`: a store is only writable when the
+   * caller opts in *and* the backend supports ingestion. When omitted, the store is read-only.
+   */
+  kind?: 'custom' | 'managed' | 'structured'
+  /**
    * Data source to ingest into when writing. Required for `add` to succeed — without it, write
    * calls throw, since the knowledge base has no destination to ingest into.
    */
@@ -49,7 +59,17 @@ export class BedrockKnowledgeBaseStore implements MemoryStore {
     this.name = config.name
     if (config.description !== undefined) this.description = config.description
     if (config.maxSearchResults !== undefined) this.maxSearchResults = config.maxSearchResults
+    // Writing requires both caller intent (`writable`) and a backend that can ingest documents.
+    // Only a `custom` data source accepts ingestion; `managed` (S3/Confluence/etc.) and `structured`
+    // (SQL/Redshift) backends cannot. Asking to write to one of those is a contradiction, so fail
+    // fast rather than silently downgrading to read-only.
     this.writable = config.writable ?? false
+    if (this.writable && config.kind !== 'custom') {
+      throw new Error(
+        `BedrockKnowledgeBaseStore: writable is true but kind is '${config.kind ?? 'undefined'}'. ` +
+          "Only a 'custom' data source supports document ingestion; 'managed' and 'structured' backends are read-only."
+      )
+    }
 
     this._runtimeClient = config.runtimeClient ?? new BedrockAgentRuntimeClient(config.runtimeClientConfig ?? {})
     this._agentClient = config.agentClient
