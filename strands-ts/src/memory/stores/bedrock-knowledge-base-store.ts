@@ -8,6 +8,8 @@ import {
   BedrockAgentClient,
   type BedrockAgentClientConfig,
   type KnowledgeBaseDocument,
+  type MetadataAttribute,
+  type MetadataAttributeValue,
   IngestKnowledgeBaseDocumentsCommand,
 } from '@aws-sdk/client-bedrock-agent'
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3'
@@ -16,25 +18,16 @@ import { v7 as uuidv7 } from 'uuid'
 import type { MemoryEntry, MemoryStore, MemoryStoreConfig, SearchOptions } from '../types.js'
 import type { JSONValue } from '../../types/json.js'
 
-/** A typed metadata attribute value, mirroring Bedrock's `MetadataAttributeValue`. */
-type AttributeValue =
-  | { type: 'STRING'; stringValue: string }
-  | { type: 'NUMBER'; numberValue: number }
-  | { type: 'BOOLEAN'; booleanValue: boolean }
-  | { type: 'STRING_LIST'; stringListValue: string[] }
-
-/** An inline metadata attribute on a `CUSTOM` document, mirroring Bedrock's `MetadataAttribute`. */
-type InlineAttribute = { key: string; value: AttributeValue }
-
 /**
  * An attribute entry in an S3 `.metadata.json` sidecar. `includeForEmbedding` is `false` so the
  * attribute is stored for filtering only and does not influence the embedding (matching how inline
- * attributes behave for `CUSTOM` documents).
+ * attributes behave for `CUSTOM` documents). The sidecar is a plain JSON file with no SDK type, so
+ * this is declared here; its `value` reuses Bedrock's `MetadataAttributeValue`.
  */
-type SidecarAttribute = { value: AttributeValue; includeForEmbedding: false }
+type SidecarAttribute = { value: MetadataAttributeValue; includeForEmbedding: false }
 
 /** Converts a caller metadata value into a Bedrock attribute value, or `undefined` if unsupported. */
-function toAttributeValue(value: JSONValue): AttributeValue | undefined {
+function toAttributeValue(value: JSONValue): MetadataAttributeValue | undefined {
   if (typeof value === 'string') return { type: 'STRING', stringValue: value }
   if (typeof value === 'number') return { type: 'NUMBER', numberValue: value }
   if (typeof value === 'boolean') return { type: 'BOOLEAN', booleanValue: value }
@@ -48,16 +41,32 @@ function toAttributeValue(value: JSONValue): AttributeValue | undefined {
  * S3 ingestion settings, required when `dataSourceType` is `'S3'`.
  *
  * An S3 data source indexes objects from a bucket — there is no inline-text path — so `add` uploads
- * its content here as an object and then ingests that object. Use the bucket the data source reads
- * from (and a `prefix` within its inclusion prefixes) so the uploaded object stays in sync with the
- * knowledge base across future data-source syncs.
+ * to this bucket and then ingests directly (`IngestKnowledgeBaseDocuments`). Unlike a `CUSTOM`
+ * document, an S3 document can't carry metadata inline, so a single `add` may write **two** objects:
+ * - the content, as a `.txt` object; and
+ * - when `scope`/`metadata` are present, a `<object-key>.metadata.json` *sidecar* beside it. This
+ *   is Bedrock's out-of-band convention for attaching attributes to an S3 object — it's paired to
+ *   the content by name and used for retrieval filtering. With no scope/metadata, no sidecar is
+ *   written.
+ *
+ * Direct ingestion indexes whatever object you point it at, so `add` works with any `bucket`/`prefix`
+ * the credentials can write to, regardless of where the data source is configured to read.
+ *
+ * The `bucket`/`prefix` choice only governs durability across future data-source *syncs*
+ * (`StartIngestionJob`): a sync reconciles the index to match the data source's scanned location, so
+ * an object outside that location is treated as deleted and removed from the index. If syncs will
+ * run against this data source, upload to the bucket it reads from and a `prefix` within its
+ * inclusion prefixes so directly-ingested memories survive them; otherwise the location is free.
  */
 export interface BedrockKnowledgeBaseS3Config {
-  /** Bucket to upload content (and metadata sidecars) to before ingestion. */
+  /** Bucket the content object and its optional `.metadata.json` sidecar are uploaded to before ingestion. */
   bucket: string
   /** Client used to upload objects. The caller owns its construction and credentials. */
   client: S3Client
-  /** Key prefix for uploaded objects (e.g. `'memories/'`). A trailing slash is added when missing. */
+  /**
+   * Key prefix for uploaded objects (e.g. `'memories/'`). A trailing slash is added when missing.
+   * Both the content object and its sidecar (when written) land under this prefix.
+   */
   prefix: string
 }
 
@@ -70,8 +79,10 @@ export interface BedrockKnowledgeBaseStoreConfig extends MemoryStoreConfig {
    * - `'CUSTOM'`: `add` ingests its `content` argument as inline text, with scope/metadata attached
    *   as inline attributes.
    * - `'S3'`: `add` uploads its `content` to the configured `s3` bucket and ingests that object, so
-   *   the write is self-contained (no separate upload or sync needed). Scope/metadata are written
-   *   alongside as a `.metadata.json` sidecar. Requires `s3`.
+   *   the write is self-contained (no separate upload or sync needed). When scope/metadata are
+   *   present they're written as a *second* object — a `.metadata.json` sidecar beside the content —
+   *   since an S3 document can't carry attributes inline; with none, only the content object is
+   *   written. Requires `s3`; see {@link BedrockKnowledgeBaseS3Config}.
    * - `'OTHER'`: any other backend (Confluence, SharePoint, Salesforce, Web, SQL/Redshift, …),
    *   which sync from an external store or are query-only and so are read-only.
    *
@@ -185,6 +196,14 @@ export class BedrockKnowledgeBaseStore implements MemoryStore {
     })
   }
 
+  /**
+   * Ingests `content` (with optional `metadata`) into the knowledge base.
+   *
+   * Only `CUSTOM` and `S3` data sources support this — they are the sole `dataSourceType`s that
+   * accept direct ingestion (`IngestKnowledgeBaseDocuments`). `OTHER` backends sync from an external
+   * store or are query-only, so the store is read-only and `add` is unavailable. Requires
+   * `dataSourceId` (and, for `S3`, an `s3` config); see {@link BedrockKnowledgeBaseStoreConfig}.
+   */
   async add(content: string, metadata?: Record<string, JSONValue>): Promise<void> {
     const dataSourceId = this._requireDataSourceId()
 
@@ -208,9 +227,16 @@ export class BedrockKnowledgeBaseStore implements MemoryStore {
   }
 
   /**
-   * Uploads the content (and, when there's scope/metadata, a `.metadata.json` sidecar beside it) to
-   * S3, returning the `s3://` URIs to reference for ingestion. Bedrock reads these objects and
-   * indexes them — scope/metadata can't be sent inline for S3, hence the sidecar convention.
+   * Uploads the objects that back one S3 ingestion and returns their `s3://` URIs.
+   *
+   * A single `add` produces up to *two* objects — hence the plural name and the multi-URI return:
+   * - `contentUri`: the content itself, uploaded as a `.txt` object. Always written.
+   * - `sidecarUri`: a `<object-key>.metadata.json` sidecar carrying scope/metadata, written *only*
+   *   when there is any to attach (so it's optional in the return). Unlike a `CUSTOM` document, an
+   *   S3 document can't carry attributes inline, so the sidecar is Bedrock's out-of-band convention
+   *   for attaching them: it sits beside the content object and Bedrock pairs the two by name.
+   *
+   * Bedrock reads and indexes these objects on ingestion.
    */
   private async _uploadS3Objects(
     content: string,
@@ -244,7 +270,15 @@ export class BedrockKnowledgeBaseStore implements MemoryStore {
     return `s3://${s3.bucket}/${key}`
   }
 
-  /** Builds a document for an `S3` data source from the uploaded object (and sidecar) URIs. */
+  /**
+   * Builds a document for an `S3` data source from the URIs produced by {@link _uploadS3Objects}.
+   *
+   * Takes both URIs because an S3 document references objects by location rather than carrying data
+   * inline: `contentUri` becomes the document's content (the object to index), and `sidecarUri`,
+   * when present, becomes its metadata (an `S3_LOCATION` pointing at the sidecar). With no
+   * scope/metadata there's no sidecar, so `sidecarUri` is omitted and the document carries no
+   * metadata.
+   */
   private _buildS3Document({
     contentUri,
     sidecarUri,
@@ -274,7 +308,7 @@ export class BedrockKnowledgeBaseStore implements MemoryStore {
    * caller metadata attached as inline attributes for retrieval filtering.
    */
   private _buildCustomDocument(content: string, metadata?: Record<string, JSONValue>): KnowledgeBaseDocument {
-    const inlineAttributes: InlineAttribute[] = []
+    const inlineAttributes: MetadataAttribute[] = []
 
     if (this._scope) {
       inlineAttributes.push({ key: this._scopeMetadataKey, value: { type: 'STRING', stringValue: this._scope } })
@@ -306,7 +340,11 @@ export class BedrockKnowledgeBaseStore implements MemoryStore {
     }
   }
 
-  /** Builds the `metadataAttributes` map for an S3 sidecar from the scope and caller metadata. */
+  /**
+   * Builds the `metadataAttributes` map for an S3 `.metadata.json` sidecar from the scope and caller
+   * metadata. Returns an empty map when there's nothing to attach — {@link _uploadS3Objects} treats
+   * that as "no sidecar" and skips writing the second object.
+   */
   private _buildSidecarAttributes(metadata?: Record<string, JSONValue>): Record<string, SidecarAttribute> {
     const attributes: Record<string, SidecarAttribute> = {}
 
