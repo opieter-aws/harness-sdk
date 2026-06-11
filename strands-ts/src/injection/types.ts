@@ -1,4 +1,6 @@
 import type { MessageData } from '../types/messages.js'
+import type { LocalAgent } from '../types/agent.js'
+import type { StateStore } from '../state-store.js'
 
 /**
  * Determines when injection runs before a model call.
@@ -14,6 +16,24 @@ import type { MessageData } from '../types/messages.js'
 export type InjectionTrigger = 'userTurn' | 'everyTurn'
 
 /**
+ * The context an injection consumer receives on each model call.
+ *
+ * Passed to `provide` and to a predicate {@link InjectionConfig.trigger}. It is a bag (not positional
+ * args) so fields can be added later without breaking callbacks — a new consumer knob is additive, not
+ * a major-version break.
+ */
+export interface ProvideContext {
+  /** The current conversation, as data. */
+  messages: MessageData[]
+  /** Durable app state shared across calls, hooks, and tools — read what a tool stashed last turn. */
+  appState: StateStore
+  /** The run's cancellation signal; forward it to async I/O in `provide` so it aborts with the run. */
+  signal: AbortSignal
+  /** The agent the injection is attached to (escape hatch for advanced consumers). */
+  agent: LocalAgent
+}
+
+/**
  * Generic injection configuration shared by every injection consumer.
  *
  * Only the trigger is generic here. What text to inject (the query, result count, and rendering) is a
@@ -23,12 +43,12 @@ export type InjectionTrigger = 'userTurn' | 'everyTurn'
 export interface InjectionConfig {
   /**
    * When injection runs. An {@link InjectionTrigger} name selects a built-in policy; a predicate is
-   * the escape hatch — it receives the current messages and returns whether to inject this call. A
-   * predicate that throws fails open (injection is skipped, the model call proceeds).
+   * the escape hatch — it receives the {@link ProvideContext} and returns whether to inject this call.
+   * A predicate that throws fails open (injection is skipped, the model call proceeds).
    *
    * @defaultValue 'userTurn'
    */
-  trigger?: InjectionTrigger | ((messages: MessageData[]) => boolean)
+  trigger?: InjectionTrigger | ((context: ProvideContext) => boolean)
 }
 
 /**
@@ -42,10 +62,10 @@ export interface InjectionMiddlewareOptions {
   /**
    * When to inject. See {@link InjectionConfig.trigger}. Defaults to `'userTurn'`.
    */
-  trigger?: InjectionTrigger | ((messages: MessageData[]) => boolean)
+  trigger?: InjectionTrigger | ((context: ProvideContext) => boolean)
   /**
    * Returns the text to fold into the latest user message, or `undefined`/`''` to skip this call. A
    * callback that throws fails open (injection is skipped, the model call proceeds).
    */
-  provide: (messages: MessageData[]) => Promise<string | undefined>
+  provide: (context: ProvideContext) => Promise<string | undefined>
 }

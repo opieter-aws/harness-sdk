@@ -20,7 +20,8 @@ import { tool } from '../tools/tool-factory.js'
 import { z } from 'zod'
 import { logger } from '../logging/logger.js'
 import { normalizeError } from '../errors.js'
-import { isUserTurn, createInjectionMiddleware } from '../injection/index.js'
+import { isUserTurn, createInjectionMiddleware } from '../injection/message-injection.js'
+import { escapeXmlText, escapeXmlAttr } from '../injection/xml.js'
 import { InvokeModelStage } from '../middleware/index.js'
 
 const SEARCH_TOOL_DESCRIPTION =
@@ -35,8 +36,15 @@ const ADD_TOOL_DESCRIPTION =
  */
 export const DEFAULT_MAX_SEARCH_RESULTS = 3
 
-/** Default number of entries injected per model call when injection does not specify one. */
-const DEFAULT_INJECTED_SEARCH_RESULTS = 1
+/**
+ * Default number of entries injected per model call when injection does not specify one.
+ *
+ * A memory store ranks by semantic (embedding) similarity, which is not the same as contextual
+ * usefulness — the top hit is not reliably the most useful entry for the turn. Injecting the top few
+ * gives the model a small candidate set to pick from rather than betting on the store's first result.
+ * Five balances that recall against context bloat; lower it for a tighter prepend.
+ */
+const DEFAULT_INJECTED_SEARCH_RESULTS = 5
 
 /** Flattens nested AggregateErrors so the leaves are concrete reasons, not errors-of-errors. */
 function _flattenReasons(reasons: unknown[]): unknown[] {
@@ -246,7 +254,7 @@ export class MemoryManager implements Plugin {
       InvokeModelStage.Input,
       createInjectionMiddleware({
         ...(config.trigger !== undefined && { trigger: config.trigger }),
-        provide: (messages) => this._provideMemoryContext(messages, config),
+        provide: (context) => this._provideMemoryContext(context.messages, config),
       })
     )
   }
@@ -279,7 +287,7 @@ export class MemoryManager implements Plugin {
     }
 
     try {
-      return (config.format ?? this._defaultInjectionFormat)(entries)
+      return config.format ? config.format({ entries }) : this._defaultInjectionFormat(entries)
     } catch (error) {
       logger.warn(`reason=<${normalizeError(error).message}> | injection format threw; skipping injection`)
       return undefined
@@ -314,7 +322,7 @@ export class MemoryManager implements Plugin {
   private _resolveInjectionQuery(messages: MessageData[], config: MemoryInjectionConfig): string | undefined {
     if (config.query) {
       try {
-        return config.query(messages)
+        return config.query({ messages })
       } catch (error) {
         logger.warn(`reason=<${normalizeError(error).message}> | injection query threw; skipping injection`)
         return undefined
@@ -343,8 +351,8 @@ export class MemoryManager implements Plugin {
   private _defaultInjectionFormat(entries: MemoryEntry[]): string {
     const items = entries.map((entry) =>
       entry.storeName
-        ? `<entry source="${entry.storeName}">${entry.content}</entry>`
-        : `<entry>${entry.content}</entry>`
+        ? `<entry source="${escapeXmlAttr(entry.storeName)}">${escapeXmlText(entry.content)}</entry>`
+        : `<entry>${escapeXmlText(entry.content)}</entry>`
     )
     return `<memory>\n${items.join('\n')}\n</memory>`
   }
