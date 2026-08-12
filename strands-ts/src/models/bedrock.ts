@@ -51,7 +51,6 @@ import {
   type CacheTTL,
   type CountTokensOptions,
   Model,
-  type ResolvedCacheSection,
   type StreamOptions,
   resolveCacheSection,
   resolveConfigMetadata,
@@ -490,18 +489,49 @@ export class BedrockModel extends Model<BedrockModelConfig> {
   }
 
   /**
-   * Resolves a section of `cacheConfig` to whether it is enabled and which TTL it carries.
+   * Applies `cacheConfig.ttl` to a caller-placed system cache point that carries no TTL of its own.
    *
-   * @param section - The section to resolve.
-   * @returns The section's enabled state and TTL, disabled when caching is off.
+   * Bedrock processes cache points in the order toolConfig, system, messages and rejects a TTL that
+   * exceeds an earlier checkpoint's. A shared `ttl` reaches tools and messages, so a system point left
+   * at the Bedrock default in between makes the whole request invalid. A TTL the caller wrote is left
+   * as written - two conflicting TTLs are theirs to reconcile.
+   *
+   * The tools checkpoint runs ahead of the system one, so the fill-in only happens when it cannot land
+   * a longer TTL behind a shorter one: it stands down whenever the tools checkpoint carries a TTL that
+   * differs from this one at all. Comparing two durations means parsing them, and `CacheTTL` accepts
+   * arbitrary strings for forward compatibility, so any difference is treated the same rather than only a
+   * shorter one. The system point is then left at the provider default of 5 minutes, exactly where it sat
+   * before a `ttl` was configured, rather than trading one rejected request for another. A differing
+   * `toolsTTL` is the caller's to reconcile, the same as a TTL they wrote by hand.
+   *
+   * A falsy TTL the caller wrote is dropped either way, because Bedrock validates `ttl` against an enum
+   * and rejects `''`, so it cannot reach the wire on its own merits. That is what the message path already
+   * does in {@link _honorPlacedCachePoint}; normalizing before the fill-in is decided keeps the guard
+   * above from handing a rejected request back to the caller.
+   *
+   * @param request - The formatted request, with `system` and `toolConfig` already populated.
    */
-  private _cacheSection(section: 'toolsTTL' | 'messagesTTL'): ResolvedCacheSection {
-    if (!this._shouldEnableCaching()) {
-      return { enabled: false }
+  private _applySystemCacheTTL(request: ConverseStreamCommandInput): void {
+    const system = request.system
+    if (!system) {
+      return
+    }
+    let ttl = this._shouldEnableCaching() ? this._config.cacheConfig?.ttl || undefined : undefined
+    if (ttl) {
+      const toolsPoint = request.toolConfig?.tools?.find((tool) => 'cachePoint' in tool)
+      if (toolsPoint && 'cachePoint' in toolsPoint && toolsPoint.cachePoint?.ttl !== ttl) {
+        ttl = undefined
+      }
     }
 
-    const cacheConfig = this._config.cacheConfig
-    return resolveCacheSection(cacheConfig?.[section], cacheConfig?.ttl)
+    for (const block of system) {
+      if ('cachePoint' in block && block.cachePoint && !block.cachePoint.ttl) {
+        delete block.cachePoint.ttl
+        if (ttl) {
+          block.cachePoint.ttl = ttl as BedrockSdkCacheTTL
+        }
+      }
+    }
   }
 
   /**
@@ -717,7 +747,10 @@ export class BedrockModel extends Model<BedrockModelConfig> {
           }) as Tool
       )
 
-      const toolsCache = this._cacheSection('toolsTTL')
+      const cacheConfig = this._config.cacheConfig
+      const toolsCache = this._shouldEnableCaching()
+        ? resolveCacheSection(cacheConfig?.toolsTTL, cacheConfig?.ttl)
+        : { enabled: false }
       if (toolsCache.enabled) {
         const cachePoint: BedrockCachePointBlock = { type: 'default' }
         if (toolsCache.ttl) {
@@ -737,6 +770,9 @@ export class BedrockModel extends Model<BedrockModelConfig> {
 
       request.toolConfig = toolConfig
     }
+
+    // Runs after toolConfig so the tools checkpoint ahead of the system one is known.
+    this._applySystemCacheTTL(request)
 
     // Add inference configuration
     const inferenceConfig: InferenceConfiguration = {}
@@ -833,7 +869,10 @@ export class BedrockModel extends Model<BedrockModelConfig> {
       return acc
     }, [])
 
-    const messagesCache = this._cacheSection('messagesTTL')
+    const cacheConfig = this._config.cacheConfig
+    const messagesCache = this._shouldEnableCaching()
+      ? resolveCacheSection(cacheConfig?.messagesTTL, cacheConfig?.ttl)
+      : { enabled: false }
     if (messagesCache.enabled) {
       this._injectCachePoint(formattedMessages, messagesCache.ttl)
     }
