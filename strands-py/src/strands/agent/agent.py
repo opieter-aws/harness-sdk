@@ -761,6 +761,30 @@ class Agent(AgentBase, LocalAgent):
         """
         return self._concurrency.mode
 
+    async def shutdown(self) -> None:
+        """Run the agent's shutdown procedures at end of life.
+
+        Safe to call more than once, and a no-op when there is nothing to release. Call it directly
+        when you own the agent's lifecycle (e.g. draining on a shutdown signal), or scope the agent
+        with ``async with`` to run it automatically on exit.
+        """
+        if self.memory_manager is not None:
+            await self.memory_manager.flush()
+
+    async def __aenter__(self) -> "Agent":
+        """Enter an ``async with`` scope, returning the agent unchanged.
+
+        Pairs with ``__aexit__``, which runs :meth:`shutdown` when the scope exits.
+        """
+        return self
+
+    async def __aexit__(self, *_: Any) -> None:
+        """Run :meth:`shutdown` when leaving an ``async with`` scope.
+
+        Runs on normal exit and when the block raises; any exception still propagates.
+        """
+        await self.shutdown()
+
     def __call__(
         self,
         prompt: AgentInput = None,

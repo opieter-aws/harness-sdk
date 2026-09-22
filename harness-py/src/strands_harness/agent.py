@@ -377,8 +377,8 @@ def create_harness(
             read-only; a ``MemoryManager`` instance is used verbatim and not forwarded to delegates;
             ``False``/``None`` disables it. An explicit ``memory_manager`` in ``agent_kwargs`` takes
             precedence. Extraction runs asynchronously every few turns on a small model, so a short run
-            may end before the first extraction fires; run
-            ``if agent.memory_manager: await agent.memory_manager.flush()`` at your shutdown boundary to
+            may end before the first extraction fires; scope the agent with ``async with agent:`` to
+            run its shutdown on exit, or call ``await agent.shutdown()`` at your shutdown boundary, to
             persist what's pending.
         builtin_plugins: Names of the built-in feature plugins to enable. Defaults to
             ``["todos", "environment"]``: ``todos`` adds a ``todo_write`` tool that tracks
