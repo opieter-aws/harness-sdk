@@ -140,7 +140,7 @@ export function providerAssessment(
     return {
       description: 'Setup required',
       status: 'error',
-      warning: `Requires ${missingPackage} · npm install -g ${missingPackage}`,
+      warning: `CLI installation is missing ${missingPackage} · reinstall @strands-agents/cli`,
     }
   }
   if (provider === 'bedrock' || provider === 'bedrock-mantle') {
@@ -177,10 +177,7 @@ export function providerAssessment(
             : 'Credentials unavailable',
       status: 'error',
       warning: `AWS credentials ${problem}.
-For Midway credentials, run mwinit, then:
-ada credentials update --account=<account-id> --provider=isengard --role=<role-name> --once
-
-Otherwise: aws sso login${profileArgument} or aws configure${profileArgument}.
+Run aws login${profileArgument} or aws configure${profileArgument}.
 
 For an API token, set AWS_BEARER_TOKEN_BEDROCK and its AWS_REGION.
 Choose Refresh after updating credentials or a selected env file.
