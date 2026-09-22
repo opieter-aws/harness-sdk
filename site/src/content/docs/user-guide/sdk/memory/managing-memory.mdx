@@ -311,7 +311,7 @@ Whether you need to flush manually depends on how you call the agent:
 await memory_manager.flush()
 ```
 
-`await agent.shutdown()` does the same flush through the agent, and scoping the agent with `async with agent:` runs that shutdown when the block exits, including on a thrown error:
+`await agent.shutdown_async()` (or the synchronous `agent.shutdown()`) does the same flush through the agent, and scoping the agent with `async with agent:` runs that shutdown when the block exits, including on a thrown error:
 
 ```python
 async with agent:

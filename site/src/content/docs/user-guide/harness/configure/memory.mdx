@@ -127,7 +127,7 @@ If you manage the agent's lifetime yourself, run its shutdown at your shutdown b
 <Tabs>
   <Tab label="Python">
     ```python
-    await agent.shutdown()
+    agent.shutdown()  # or `await agent.shutdown_async()` from async code
     ```
   </Tab>
   <Tab label="TypeScript">

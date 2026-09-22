@@ -3135,8 +3135,7 @@ async def test_agent_async_invoke_does_not_flush_memory_manager():
     memory_manager.flush.assert_not_awaited()
 
 
-@pytest.mark.asyncio
-async def test_agent_shutdown_flushes_memory_manager():
+def test_agent_shutdown_flushes_memory_manager():
     memory_manager = MemoryManager(stores=[_SearchOnlyStore()])
     memory_manager.flush = unittest.mock.AsyncMock()
     agent = Agent(
@@ -3144,7 +3143,21 @@ async def test_agent_shutdown_flushes_memory_manager():
         memory_manager=memory_manager,
     )
 
-    await agent.shutdown()
+    agent.shutdown()
+
+    memory_manager.flush.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_agent_shutdown_async_flushes_memory_manager():
+    memory_manager = MemoryManager(stores=[_SearchOnlyStore()])
+    memory_manager.flush = unittest.mock.AsyncMock()
+    agent = Agent(
+        model=MockedModelProvider([{"role": "assistant", "content": [{"text": "response"}]}]),
+        memory_manager=memory_manager,
+    )
+
+    await agent.shutdown_async()
 
     memory_manager.flush.assert_awaited_once()
 
@@ -3187,6 +3200,45 @@ async def test_agent_async_context_manager_without_memory_manager_is_noop():
     agent = Agent(model=MockedModelProvider([{"role": "assistant", "content": [{"text": "response"}]}]))
 
     async with agent:
+        pass
+
+    assert agent.memory_manager is None
+
+
+def test_agent_context_manager_flushes_memory_manager_on_exit():
+    memory_manager = MemoryManager(stores=[_SearchOnlyStore()])
+    memory_manager.flush = unittest.mock.AsyncMock()
+    agent = Agent(
+        model=MockedModelProvider([{"role": "assistant", "content": [{"text": "response"}]}]),
+        memory_manager=memory_manager,
+    )
+
+    with agent as entered:
+        assert entered is agent
+        memory_manager.flush.assert_not_awaited()
+
+    memory_manager.flush.assert_awaited_once()
+
+
+def test_agent_context_manager_flushes_and_propagates_on_error():
+    memory_manager = MemoryManager(stores=[_SearchOnlyStore()])
+    memory_manager.flush = unittest.mock.AsyncMock()
+    agent = Agent(
+        model=MockedModelProvider([{"role": "assistant", "content": [{"text": "response"}]}]),
+        memory_manager=memory_manager,
+    )
+
+    with pytest.raises(RuntimeError, match="boom"):
+        with agent:
+            raise RuntimeError("boom")
+
+    memory_manager.flush.assert_awaited_once()
+
+
+def test_agent_context_manager_without_memory_manager_is_noop():
+    agent = Agent(model=MockedModelProvider([{"role": "assistant", "content": [{"text": "response"}]}]))
+
+    with agent:
         pass
 
     assert agent.memory_manager is None

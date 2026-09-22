@@ -378,8 +378,8 @@ def create_harness(
             ``False``/``None`` disables it. An explicit ``memory_manager`` in ``agent_kwargs`` takes
             precedence. Extraction runs asynchronously every few turns on a small model, so a short run
             may end before the first extraction fires; scope the agent with ``async with agent:`` to
-            run its shutdown on exit, or call ``await agent.shutdown()`` at your shutdown boundary, to
-            persist what's pending.
+            run its shutdown on exit, or call ``agent.shutdown()`` (``await agent.shutdown_async()``
+            from async code) at your shutdown boundary, to persist what's pending.
         builtin_plugins: Names of the built-in feature plugins to enable. Defaults to
             ``["todos", "environment"]``: ``todos`` adds a ``todo_write`` tool that tracks
             multi-step work and re-surfaces the list before each step; ``environment`` injects the

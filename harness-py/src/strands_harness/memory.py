@@ -7,8 +7,8 @@ session: memory survives across sessions and works with sessions off.
 
 Extraction is background and turn-triggered, so a short run can end with the latest turns unsaved.
 Scoping the agent with ``async with agent:`` runs its shutdown on exit, or the owner of the agent's
-lifecycle calls ``await agent.shutdown()`` at shutdown; the harness's CLI does the latter, and a
-library consumer should do one or the other.
+lifecycle calls ``agent.shutdown()`` (``await agent.shutdown_async()`` from async code) at shutdown;
+the harness's CLI flushes at that boundary for you, and a library consumer should do one of these.
 
 A consumer can swap the backend by passing their own ``stores``; the harness still owns the manager, so its
 injection/tool policy (injection on, ``search_memory`` on, ``add_memory`` off) applies either way.
