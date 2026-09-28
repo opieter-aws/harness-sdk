@@ -6,6 +6,7 @@
  * than simply discarding it.
  */
 
+import type { Invocation } from '../agent/invocation.js'
 import type { LocalAgent } from '../types/agent.js'
 import {
   ConversationManager,
@@ -108,9 +109,9 @@ export class SummarizingConversationManager extends ConversationManager {
    * @param options - The reduction options
    * @returns `true` if the history was reduced, `false` otherwise
    */
-  async reduce({ agent, error }: ConversationManagerReduceOptions): Promise<boolean> {
+  async reduce({ agent, error, invocation }: ConversationManagerReduceOptions): Promise<boolean> {
     try {
-      return await this._summarizeOldest(agent, this._model ?? agent.auxModel)
+      return await this._summarizeOldest(agent, this._model ?? agent.auxModel, invocation)
     } catch (summarizationError) {
       if (error) {
         // Reactive: rethrow so the ContextWindowOverflowError propagates
@@ -130,9 +131,10 @@ export class SummarizingConversationManager extends ConversationManager {
    *
    * @param agent - The agent instance
    * @param model - The model to use for summarization
+   * @param invocation - Shared state the summary call's usage folds into
    * @returns `true` if the history was reduced, `false` otherwise
    */
-  private async _summarizeOldest(agent: LocalAgent, model: Model): Promise<boolean> {
+  private async _summarizeOldest(agent: LocalAgent, model: Model, invocation?: Invocation): Promise<boolean> {
     const messages = agent.messages
 
     // Calculate how many messages to summarize
@@ -166,7 +168,7 @@ export class SummarizingConversationManager extends ConversationManager {
     }
 
     // Generate summary via model call
-    const summaryMessage = await generateSummary(toSummarize, model, this._summarizationSystemPrompt)
+    const summaryMessage = await generateSummary(toSummarize, model, this._summarizationSystemPrompt, invocation)
 
     // Replace summarized range with protected messages + summary
     messages.splice(0, messagesToSummarizeCount, ...protectedToPreserve, summaryMessage)
