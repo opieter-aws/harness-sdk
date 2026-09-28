@@ -3,10 +3,12 @@ import { AfterToolCallEvent, BeforeToolCallEvent, ToolStreamUpdateEvent } from '
 import { InterruptError, interruptFromAgent } from '../../interrupt.js'
 import { createMiddlewareInterrupt } from '../../middleware/interrupt.js'
 import { ExecuteToolStage } from '../../middleware/index.js'
+import { attachInvocation } from '../../agent/invocation.js'
 import { deepCopy } from '../../types/json.js'
 import { TextBlock, ToolResultBlock } from '../../types/messages.js'
 
 import type { Agent } from '../../agent/agent.js'
+import type { Invocation } from '../../agent/invocation.js'
 import type { BackgroundTasks } from '../../background-tasks/background-tasks.js'
 import type { ToolUseData } from '../../hooks/events.js'
 import type { ExecuteToolContext, ExecuteToolResult, MiddlewareRegistry } from '../../middleware/index.js'
@@ -34,6 +36,8 @@ export interface ToolExecutorOptions {
   readonly meter: Meter
   /** Cancellation signal scoped to this executor invocation. */
   readonly cancelSignal: AbortSignal
+  /** Shared state for the in-flight request, stamped onto each {@link ToolContext} so an SDK-vended tool's auxiliary model calls fold into the request total. */
+  readonly invocation?: Invocation
   readonly toolInterrupt?: ToolContext['interrupt']
   readonly middlewareInterrupt?: ExecuteToolContext['interrupt']
   readonly toolGuard?: (tool: Tool | undefined) => void
@@ -326,6 +330,10 @@ export abstract class ToolExecutor {
             options.toolInterrupt
               ? options.toolInterrupt<T>(params)
               : interruptFromAgent<T>(options.agent, `tool:${toolUse.toolUseId}:${params.name}`, params, 'tool'),
+        }
+
+        if (options.invocation !== undefined) {
+          attachInvocation(toolContext, options.invocation)
         }
 
         // Iterate manually to wrap raw tool events at the agent boundary and

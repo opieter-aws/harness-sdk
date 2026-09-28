@@ -1,4 +1,5 @@
 import type { InvocationState, InvokeArgs } from '../types/agent.js'
+import type { Invocation } from '../agent/invocation.js'
 import type { CheckpointResumeContent } from '../experimental/checkpoint.js'
 import type { Message, MessageData } from '../types/messages.js'
 import type { HookableEvent } from '../hooks/events.js'
@@ -56,6 +57,21 @@ export interface MultiAgentInvokeOptions {
    * an exceptional exit, not a normal terminal state.
    */
   cancelSignal?: AbortSignal
+}
+
+/**
+ * Orchestrator invoke options carrying the enclosing request's shared state.
+ *
+ * A nested orchestrator (wrapped by {@link MultiAgentNode}) receives the parent's
+ * {@link Invocation} through this channel so its nodes fold into one usage total. It is
+ * kept off the public {@link MultiAgentInvokeOptions} so an external caller cannot join a
+ * foreign request's state.
+ *
+ * @internal
+ */
+export interface MultiAgentInternalInvokeOptions extends MultiAgentInvokeOptions {
+  /** The enclosing request's shared state to join, if any. */
+  invocation?: Invocation
 }
 
 /**

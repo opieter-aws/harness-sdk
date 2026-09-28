@@ -2,7 +2,8 @@ import { logger } from '../logging/logger.js'
 import { warnOnce } from '../logging/warn-once.js'
 import type { AttributeValue, Span } from '@opentelemetry/api'
 import type { InvocationState, InvokableAgent } from '../types/agent.js'
-import type { MultiAgentInput, MultiAgentInvokeOptions } from './multiagent.js'
+import { createInvocation, type Invocation } from '../agent/invocation.js'
+import type { MultiAgentInput, MultiAgentInternalInvokeOptions, MultiAgentInvokeOptions } from './multiagent.js'
 import {
   applyOrchestratorHookResponses,
   dropStaleInterruptedResult,
@@ -241,9 +242,14 @@ export class Swarm implements MultiAgent {
     // are visible to the next.
     const invocationState: InvocationState = options?.invocationState ?? {}
 
+    // One Invocation shared by every node so the whole run rolls into a
+    // single usage total. A nested orchestrator inherits the enclosing request's
+    // state through the internal channel; a root orchestrator mints its own.
+    const invocation = (options as MultiAgentInternalInvokeOptions | undefined)?.invocation ?? createInvocation()
+
     // Hook invocation lives in `_stream` so hook-raised `InterruptError`s land in the
     // same frame as the execution loop.
-    const gen = this._stream(input, invocationState, options?.cancelSignal)
+    const gen = this._stream(input, invocationState, invocation, options?.cancelSignal)
     let next = await gen.next()
     while (!next.done) {
       yield next.value
@@ -255,6 +261,7 @@ export class Swarm implements MultiAgent {
   private async *_stream(
     input: MultiAgentInput,
     invocationState: InvocationState,
+    invocation: Invocation,
     externalCancelSignal?: AbortSignal
   ): AsyncGenerator<MultiAgentStreamEvent, MultiAgentResult, undefined> {
     // Reuse state from a prior INTERRUPTED run so `swarm.invoke(responses)` can
@@ -364,6 +371,7 @@ export class Swarm implements MultiAgent {
           handoff,
           multiAgentSpan,
           invocationState,
+          invocation,
           nodeCancelSignal
         )
         nextInput = input
@@ -436,6 +444,7 @@ export class Swarm implements MultiAgent {
     handoff: HandoffResult | undefined,
     multiAgentSpan: Span | null,
     invocationState: InvocationState,
+    invocation: Invocation,
     executionSignal?: AbortSignal
   ): AsyncGenerator<MultiAgentStreamEvent, NodeResult, undefined> {
     const nodeState = state.node(node.id)!
@@ -488,6 +497,7 @@ export class Swarm implements MultiAgent {
         node.stream(nodeInput, state, {
           structuredOutputSchema: handoffSchema,
           invocationState,
+          invocation,
           ...(cancelSignal && { cancelSignal }),
         })
       )

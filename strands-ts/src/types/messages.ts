@@ -726,6 +726,13 @@ export type StopReason =
   | (string & {}) // Allow any string while preserving autocomplete for known values
 
 /**
+ * Stop reasons signalling a request hit one of its {@link InvokeOptions.limits}.
+ *
+ * @internal
+ */
+export const LIMIT_STOP_REASONS = new Set<StopReason>(['limitTurns', 'limitTotalTokens', 'limitOutputTokens'])
+
+/**
  * System prompt for guiding model behavior.
  * Can be a simple string or an array of content blocks for advanced caching.
  *

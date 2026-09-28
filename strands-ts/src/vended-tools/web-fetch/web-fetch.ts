@@ -1,6 +1,8 @@
 import { z } from 'zod'
 
 import { Agent } from '../../agent/agent.js'
+import { deriveAuxiliaryInvocation } from '../../agent/invocation.js'
+import type { InternalInvokeOptions } from '../../types/agent.js'
 import { tool } from '../../tools/tool-factory.js'
 import { htmlToMarkdown } from './extract.js'
 import { type MakeWebFetchOptions, WEB_FETCH_DESCRIPTION_MARKDOWN, WEB_FETCH_DESCRIPTION_AGENTIC } from './types.js'
@@ -91,7 +93,13 @@ export function makeWebFetch(options: MakeWebFetchOptions = {}): ReturnType<type
       }
 
       const signal = context?.cancelSignal ?? null
-      const invokeOptions = context?.cancelSignal ? { cancelSignal: context.cancelSignal } : {}
+      // Fold the analyst's tokens into the request total without limiting this
+      // auxiliary call by the request's limits.
+      const auxiliaryInvocation = deriveAuxiliaryInvocation(context?.invocation)
+      const invokeOptions: InternalInvokeOptions = {
+        ...(context?.cancelSignal && { cancelSignal: context.cancelSignal }),
+        ...(auxiliaryInvocation && { invocation: auxiliaryInvocation }),
+      }
       const [contentType, raw] = await fetchOnce(url, maxBytes, signal)
 
       const isMarkup = contentType.toLowerCase().includes('html') || contentType.toLowerCase().includes('xml')

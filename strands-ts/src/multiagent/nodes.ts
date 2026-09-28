@@ -1,7 +1,8 @@
 import { Agent } from '../agent/agent.js'
 import { AgentPrinter, type Printer } from '../agent/printer.js'
-import type { InvocationState, InvokeOptions, InvokableAgent, AgentStreamEvent } from '../types/agent.js'
-import type { MultiAgentInput } from './multiagent.js'
+import type { InvocationState, InternalInvokeOptions, InvokableAgent, AgentStreamEvent } from '../types/agent.js'
+import type { Invocation } from '../agent/invocation.js'
+import type { MultiAgentInput, MultiAgentInternalInvokeOptions } from './multiagent.js'
 import { dropStaleInterruptedResult } from './multiagent.js'
 import type { MultiAgentStreamEvent } from './events.js'
 import { NodeStreamUpdateEvent, NodeResultEvent } from './events.js'
@@ -49,6 +50,13 @@ export interface NodeInputOptions {
    * orchestrators to enforce per-node timeouts or propagate external cancellation.
    */
   cancelSignal?: AbortSignal
+
+  /**
+   * The request's shared state, forwarded to the node's underlying
+   * agent so its usage folds into the whole run's total.
+   * @internal
+   */
+  invocation?: Invocation
 
   /**
    * Buffer the agent's printer output and flush it on completion so concurrent siblings
@@ -290,9 +298,12 @@ export class AgentNode extends Node {
     }
 
     try {
-      const invokeOptions: InvokeOptions = {
+      // Join the request's shared state so this node's usage folds
+      // into the whole run's total rather than opening a fresh per-agent one.
+      const invokeOptions: InternalInvokeOptions = {
         ...(options?.structuredOutputSchema && { structuredOutputSchema: options.structuredOutputSchema }),
         ...(options?.cancelSignal && { cancelSignal: options.cancelSignal }),
+        ...(options?.invocation && { invocation: options.invocation }),
         invocationState,
       }
 
@@ -389,10 +400,12 @@ export class MultiAgentNode extends Node {
     // handle() is public API, so direct callers get per-call state.
     const invocationState: InvocationState = options?.invocationState ?? {}
 
-    const gen = this._orchestrator.stream(input, {
+    const nestedOptions: MultiAgentInternalInvokeOptions = {
       invocationState,
       ...(options?.cancelSignal && { cancelSignal: options.cancelSignal }),
-    })
+      ...(options?.invocation && { invocation: options.invocation }),
+    }
+    const gen = this._orchestrator.stream(input, nestedOptions)
     let next = await gen.next()
     while (!next.done) {
       const event = next.value

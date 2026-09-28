@@ -61,12 +61,13 @@
  */
 
 import { Agent } from '../../agent/agent.js'
+import { deriveAuxiliaryInvocation, type Invocation } from '../../agent/invocation.js'
 import { AfterInvocationEvent, BeforeInvocationEvent, BeforeModelCallEvent } from '../../hooks/events.js'
 import { logger } from '../../logging/logger.js'
 import { warnOnce } from '../../logging/warn-once.js'
 import type { Model } from '../../models/model.js'
 import type { Plugin } from '../../plugins/plugin.js'
-import type { LocalAgent } from '../../types/agent.js'
+import type { InternalInvokeOptions, LocalAgent } from '../../types/agent.js'
 import type { ContentBlock, Message } from '../../types/messages.js'
 import type { Snapshot } from '../../types/snapshot.js'
 import { JUDGE_OUTCOME_SCHEMA, JUDGE_SYSTEM_PROMPT, buildJudgePrompt } from './judge.js'
@@ -351,7 +352,7 @@ export class GoalLoop implements Plugin {
 
       let outcome: ValidationOutcome
       try {
-        outcome = await validator(response)
+        outcome = await validator(response, event.invocation)
       } catch (validatorError) {
         // Surface validator throws so a buggy validator (e.g. a TypeError that
         // fails identically on every attempt) is visible in logs rather than
@@ -390,7 +391,9 @@ export class GoalLoop implements Plugin {
    * per call so prior judgements' prompts don't leak into the next judgement's
    * context.
    */
-  private _buildValidator(hostAgent: LocalAgent): (response: Message) => Promise<ValidationOutcome> {
+  private _buildValidator(
+    hostAgent: LocalAgent
+  ): (response: Message, invocation?: Invocation) => Promise<ValidationOutcome> {
     const validator = this._validator
     if (validator) {
       return async (response) => {
@@ -404,15 +407,20 @@ export class GoalLoop implements Plugin {
     // The NL judge intentionally ignores the `response` argument — its prompt
     // includes the full host transcript (via `buildJudgePrompt`) so the judge
     // can evaluate against context, not just the last assistant turn.
-    return async () => {
+    return async (_response, invocation) => {
       const judge = new Agent({
         model: this._judgeModel ?? hostAgent.model,
         printer: false,
         systemPrompt: this._judgeSystemPrompt,
       })
-      const judgeResult = await judge.invoke(buildJudgePrompt(goalDescription, hostAgent.messages), {
+      // Fold the judge's tokens into the request total without limiting this
+      // auxiliary call by the request's limits.
+      const auxiliaryInvocation = deriveAuxiliaryInvocation(invocation)
+      const invokeOptions: InternalInvokeOptions = {
         structuredOutputSchema: JUDGE_OUTCOME_SCHEMA,
-      })
+        ...(auxiliaryInvocation && { invocation: auxiliaryInvocation }),
+      }
+      const judgeResult = await judge.invoke(buildJudgePrompt(goalDescription, hostAgent.messages), invokeOptions)
       return (
         (judgeResult.structuredOutput as ValidationOutcome | undefined) ?? {
           passed: false,

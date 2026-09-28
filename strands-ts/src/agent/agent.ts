@@ -1,6 +1,7 @@
 import {
   AgentResult,
   type AgentStreamEvent,
+  type InternalInvokeOptions,
   type InvocationState,
   type InvokableAgent,
   type InvokeArgs,
@@ -31,10 +32,12 @@ import type { ToolChoice, ToolSpec } from '../tools/types.js'
 import { cloneSystemPrompt, systemPromptFromData } from '../types/messages.js'
 import { normalizeError, ConcurrentInvocationError, StructuredOutputError } from '../errors.js'
 import { Model } from '../models/model.js'
+import { ModelProxy } from '../models/model-proxy.js'
 import { ModelRouter } from '../models/routing/router.js'
 import type { BaseModelConfig, StreamAggregatedResult, StreamOptions } from '../models/model.js'
 import { ModelPlugin } from '../plugins/model-plugin.js'
 import { totalPromptTokens, isModelStreamEvent } from '../models/streaming.js'
+import { attachInvocation, createInvocation, type Invocation } from './invocation.js'
 import { ToolRegistry } from '../registry/tool-registry.js'
 import { StateStore } from '../state-store.js'
 import { serializeStateSerializable, loadStateSerializable } from '../types/serializable.js'
@@ -485,6 +488,10 @@ export class Agent implements LocalAgent, InvokableAgent {
   private _mcpClients: McpClient[]
   private _initialized: boolean
   private _isInvoking: boolean = false
+  // Request-scoped state for the in-flight request: created when this call is
+  // the root, inherited when nested. Held for the duration of one stream() and
+  // cleared on exit; the agent lock guarantees a single active invocation.
+  private _activeInvocation: Invocation | undefined
   private _abortController = new AbortController()
   private _abortSignal: AbortSignal = this._abortController.signal
   private _printer?: Printer
@@ -610,6 +617,7 @@ export class Agent implements LocalAgent, InvokableAgent {
                 cancelSignal: context.cancelSignal,
                 toolInterrupt: context.interrupt,
                 middlewareInterrupt,
+                ...(this._activeInvocation !== undefined && { invocation: this._activeInvocation }),
                 toolGuard: (selectedTool) => this._backgroundTasks!.assertToolCanRun(selectedTool),
               },
               context.toolUse,
@@ -871,15 +879,11 @@ export class Agent implements LocalAgent, InvokableAgent {
   }
 
   /**
-   * Validates the per-invocation budget caps in {@link InvokeOptions.limits}.
-   * Called once at the top of `_stream` so bad inputs fail fast with a clear
-   * error instead of silently no-op'ing (`NaN`, `Infinity`) or tripping
-   * pathologically (zero swallows the user input; negative trips immediately).
-   *
-   * Each cap, when set, must be a positive finite number. Fractional values
-   * are accepted — harmless, and useful for token budgets derived from
-   * arithmetic. Unrecognized keys are rejected for the same reason: a
-   * mistyped cap name would otherwise silently apply no limit at all.
+   * Validates {@link InvokeOptions.limits} so bad input fails fast rather than
+   * silently no-op'ing (`NaN`, `Infinity`) or tripping pathologically (zero,
+   * negative). Each limit, when set, must be a positive finite number;
+   * fractional values are allowed. An unrecognized key throws, since a mistyped
+   * limit name would otherwise apply no limit at all.
    */
   private _validateLimits(options: InvokeOptions | undefined): void {
     if (!options?.limits) return
@@ -890,7 +894,7 @@ export class Agent implements LocalAgent, InvokableAgent {
       .sort()
     if (unrecognizedKeys.length > 0) {
       throw new TypeError(
-        `limits keys [${unrecognizedKeys.join(', ')}] are not recognized caps, ` +
+        `limits keys [${unrecognizedKeys.join(', ')}] are not recognized limits, ` +
           `expected one of ${LIMITS_KEYS.map((key) => `'${key}'`).join(', ')}`
       )
     }
@@ -903,30 +907,40 @@ export class Agent implements LocalAgent, InvokableAgent {
   }
 
   /**
-   * Evaluates the per-invocation budget caps in {@link InvokeOptions.limits}
-   * against the current invocation's metrics. Called at the top of each
-   * agent-loop iteration, after `_throwIfCancelled` and before `startCycle`.
+   * Builds the {@link AgentResult} for a run that stopped on a limit. A limit
+   * already reached by an enclosing request can trip before this agent appends
+   * its first message, so `lastMessage` falls back to an empty assistant turn.
    *
-   * Reads from {@link AgentMetrics.latestAgentInvocation} (scoped to the
-   * current invocation) — not `cycleCount` / `accumulatedUsage`, which are
-   * lifetime accumulators that would cause caps to fire prematurely on the
-   * second `invoke()` call against a reused agent.
-   *
-   * Priority on simultaneous trip: turns → totalTokens → outputTokens.
-   *
-   * Returns the {@link StopReason} the loop should terminate with, or
-   * `undefined` if every configured cap is still within budget.
+   * @param limitStopReason - The limit that tripped
+   * @param invocationState - The shared per-invocation state bag
+   * @returns A well-formed result carrying the limit stop reason
    */
-  private _checkLimits(options: InvokeOptions | undefined): StopReason | undefined {
-    const limits = options?.limits
-    if (!limits) return undefined
-    const invocation = this._meter.metrics.latestAgentInvocation
-    if (!invocation) return undefined
+  private _buildLimitStopResult(limitStopReason: StopReason, invocationState: InvocationState): AgentResult {
+    return new AgentResult({
+      stopReason: limitStopReason,
+      lastMessage: this.messages.at(-1) ?? new Message({ role: 'assistant', content: [] }),
+      traces: this._tracer.localTraces,
+      metrics: this._meter.metrics,
+      invocationState,
+    })
+  }
 
-    const cycleCount = invocation.cycles.length
+  /**
+   * Returns the {@link StopReason} the loop should stop with once an
+   * {@link InvokeOptions.limits} limit is reached, else `undefined`. Reads the
+   * shared {@link Invocation} rather than this agent's meter, so the limits
+   * bound the whole request, sub-agents included. Priority on simultaneous trip:
+   * turns → totalTokens → outputTokens.
+   *
+   * @param invocation - The request-scoped state for the in-flight request
+   * @returns The stop reason to terminate with, or `undefined` if within limits
+   */
+  private _checkLimits(invocation: Invocation | undefined): StopReason | undefined {
+    const limits = invocation?.limits
+    if (!invocation || !limits) return undefined
+
     const { outputTokens, totalTokens } = invocation.usage
-
-    if (limits.turns !== undefined && cycleCount >= limits.turns) {
+    if (limits.turns !== undefined && invocation.turns >= limits.turns) {
       return 'limitTurns'
     }
     if (limits.totalTokens !== undefined && totalTokens >= limits.totalTokens) {
@@ -936,6 +950,24 @@ export class Agent implements LocalAgent, InvokableAgent {
       return 'limitOutputTokens'
     }
     return undefined
+  }
+
+  /**
+   * Inherits the enclosing request's state when nested, else starts a fresh one
+   * from this call's limits.
+   *
+   * @param options - The per-invocation options, if any
+   * @returns The request-scoped state to run this call under
+   * @throws Error if `limits` is set on a nested invoke (it inherits the enclosing limits)
+   */
+  private _resolveInvocation(options: InvokeOptions | undefined): Invocation {
+    const inherited = (options as InternalInvokeOptions | undefined)?.invocation
+    if (inherited && options?.limits !== undefined) {
+      throw new Error(
+        'limits can only be set on the root invoke of a request; a nested agent inherits the enclosing limits'
+      )
+    }
+    return inherited ?? createInvocation(options?.limits)
   }
 
   /**
@@ -1149,8 +1181,10 @@ export class Agent implements LocalAgent, InvokableAgent {
       await this.initialize()
 
       // Thread the resolved invocationState so all layers share the same reference.
-      const invocationState = options?.invocationState ?? {}
+      const invocationState: InvocationState = options?.invocationState ?? {}
       const resolvedOptions: InvokeOptions = options?.invocationState ? options : { ...options, invocationState }
+
+      this._activeInvocation = this._resolveInvocation(options)
 
       let currentArgs: InvokeArgs = args
 
@@ -1258,6 +1292,8 @@ export class Agent implements LocalAgent, InvokableAgent {
         continuationEvent,
         new Error('Agent stream closed before continuation input was incorporated into agent history')
       )
+      // Clear it so a later invoke on this agent starts fresh, not inheriting a spent one.
+      this._activeInvocation = undefined
       this._isInvoking = false
     }
   }
@@ -1495,6 +1531,10 @@ export class Agent implements LocalAgent, InvokableAgent {
    * @returns The event after processing
    */
   private async _invokeCallbacks(event: AgentStreamEvent): Promise<AgentStreamEvent> {
+    // Stamp it so a hook running an out-of-loop model call joins the request.
+    if (this._activeInvocation !== undefined && event.invocation === undefined) {
+      attachInvocation(event, this._activeInvocation)
+    }
     if (event instanceof HookableEvent) {
       await this._hooksRegistry.invokeCallbacks(event)
     }
@@ -1584,17 +1624,15 @@ export class Agent implements LocalAgent, InvokableAgent {
       while (true) {
         this._throwIfCancelled()
 
-        const limitStopReason = this._checkLimits(options)
+        const limitStopReason = this._checkLimits(this._activeInvocation)
         if (limitStopReason) {
-          result = new AgentResult({
-            stopReason: limitStopReason,
-            lastMessage: this.messages.at(-1)!,
-            traces: this._tracer.localTraces,
-            metrics: this._meter.metrics,
-            invocationState,
-          })
+          result = this._buildLimitStopResult(limitStopReason, invocationState)
           return result
         }
+
+        // Count this turn before it runs, so the next iteration's limit check
+        // sees the pre-turn count (matching the meter's cycle bookkeeping).
+        if (this._activeInvocation) this._activeInvocation.turns += 1
 
         // Start metrics cycle tracking
         const { cycleId, startTime: cycleStartTime } = this._meter.startCycle()
@@ -2273,6 +2311,11 @@ export class Agent implements LocalAgent, InvokableAgent {
       ...(projectedInputTokens !== undefined && { projectedInputTokens }),
     }
 
+    // Stamp it so a router strategy's classifier call joins the request.
+    if (this._activeInvocation !== undefined) {
+      attachInvocation(context, this._activeInvocation)
+    }
+
     // Snapshot model state before middleware runs so concurrent mutations don't leak in.
     // The writeback happens after the entire middleware chain completes, so middleware
     // cannot affect modelState at any point (before or after next()).
@@ -2375,7 +2418,11 @@ export class Agent implements LocalAgent, InvokableAgent {
     invocationState: InvocationState
   ): AsyncGenerator<AgentStreamEvent, StreamAggregatedResult, undefined> {
     messages = normalizeToolUseNames(messages)
-    const streamGenerator = model.streamAggregated(messages, streamOptions)
+    // Route every model call through the proxy, the single per-call seam
+    // carrying the request state. This terminal is shared by every agent the
+    // request reaches, so one wrap here covers sub-agents and nodes alike.
+    const proxy = new ModelProxy(model)
+    const streamGenerator = proxy.streamAggregated(messages, streamOptions, this._activeInvocation)
     try {
       let result = await streamGenerator.next()
 
@@ -2469,6 +2516,7 @@ export class Agent implements LocalAgent, InvokableAgent {
             tracer: this._tracer,
             meter: this._meter,
             cancelSignal: this._abortSignal,
+            ...(this._activeInvocation !== undefined && { invocation: this._activeInvocation }),
             ...(this._backgroundTasks && {
               backgroundTasks: this._backgroundTasks,
               backgroundTaskPassId: assistantMessage.trackingId,

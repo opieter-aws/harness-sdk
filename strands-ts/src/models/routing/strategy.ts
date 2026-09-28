@@ -1,5 +1,6 @@
 import type { Model } from '../model.js'
 import type { ModelRouter, RoutingCandidate } from './router.js'
+import type { Invocation } from '../../agent/invocation.js'
 import type { InvocationState } from '../../types/agent.js'
 import type { Message, SystemPrompt } from '../../types/messages.js'
 import type { ToolSpec } from '../../tools/types.js'
@@ -24,6 +25,13 @@ export interface RoutingContext {
   readonly candidates: readonly RoutingCandidate[]
   /** Live invocation state, exposed as read-only. */
   readonly invocationState: Readonly<InvocationState>
+  /**
+   * The in-flight request's shared state, so a strategy's classifier model
+   * call folds its tokens into the request total.
+   *
+   * @internal
+   */
+  readonly invocation?: Invocation
   /** Chronological attempts made during this invocation. */
   readonly attempts: readonly RoutingAttempt[]
 }

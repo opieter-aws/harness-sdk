@@ -6,6 +6,7 @@
  */
 
 import type { Plugin } from '../plugins/plugin.js'
+import type { Invocation } from '../agent/invocation.js'
 import type { LocalAgent } from '../types/agent.js'
 import { AfterModelCallEvent, BeforeModelCallEvent } from '../hooks/events.js'
 import { ContextWindowOverflowError } from '../errors.js'
@@ -47,6 +48,13 @@ export type ConversationManagerReduceOptions = {
    * proceeds regardless.
    */
   error?: ContextWindowOverflowError
+
+  /**
+   * Shared state for the enclosing request. A model-based reduction folds its
+   * summarization call's usage into this total.
+   * @internal
+   */
+  invocation?: Invocation
 }
 
 /**
@@ -167,7 +175,15 @@ export abstract class ConversationManager implements Plugin {
     // Reactive overflow recovery
     agent.addHook(AfterModelCallEvent, async (event) => {
       if (event.error instanceof ContextWindowOverflowError) {
-        if (await this.reduce({ agent: event.agent, model: event.model, error: event.error })) {
+        const invocation = event.invocation
+        if (
+          await this.reduce({
+            agent: event.agent,
+            model: event.model,
+            error: event.error,
+            ...(invocation && { invocation }),
+          })
+        ) {
           event.retry = true
         }
       }
@@ -189,8 +205,13 @@ export abstract class ConversationManager implements Plugin {
           `projected_tokens=<${event.projectedInputTokens}>, ratio=<${ratio.toFixed(2)}>, compression_threshold=<${this._compressionThreshold}> | compression threshold exceeded, reducing context`
         )
         // Proactive compression is best-effort: swallow errors so the model call can still proceed.
+        const invocation = event.invocation
         try {
-          await this.reduce({ agent: event.agent, model: event.model })
+          await this.reduce({
+            agent: event.agent,
+            model: event.model,
+            ...(invocation && { invocation }),
+          })
         } catch (e) {
           logger.warn(`conversation_manager=<${this.name}> | proactive compression failed, continuing | error=<${e}>`)
         }

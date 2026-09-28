@@ -41,6 +41,7 @@ import type {
 } from '../middleware/types.js'
 import type { ToolRegistry } from '../registry/tool-registry.js'
 import type { Model } from '../models/model.js'
+import type { Invocation } from '../agent/invocation.js'
 import type { z } from 'zod'
 import { AgentMetrics } from '../telemetry/meter.js'
 
@@ -137,62 +138,74 @@ export interface InvokeOptions {
   cancelSignal?: AbortSignal
 
   /**
-   * Per-invocation budget caps. Each cap, when set, bounds the agent loop
-   * for this `invoke()` / `stream()` call only — counters are not cumulative
-   * across reuses of the same agent.
+   * Limits bounding the whole request this `invoke()` / `stream()` call sets
+   * off: this agent's loop, sub-agents added via `asTool()`, and any nested
+   * Graph/Swarm all share them. A hand-written tool that invokes another agent
+   * directly is not covered — that sub-agent runs under its own limits, as if
+   * invoked standalone. Auxiliary model calls (summarization, routing,
+   * extraction, steering, HITL, goal judging) add their tokens to the shared
+   * total but are not turn-limited. Counters reset on each reuse of the agent.
    *
-   * Caps are checked at the top of each loop iteration. Tools requested by
-   * the previous turn always run to completion before a cap fires, so
-   * `agent.messages` remains in a reinvokable state.
+   * Limits are checked at the top of each loop iteration, so tools requested by
+   * the previous turn run to completion first and `agent.messages` stays
+   * reinvokable. Each limit, when set, must be a positive finite number; omit a
+   * field (or `limits` itself) for no limit on that dimension.
    *
-   * Each cap, when set, must be a positive finite number. Omit any field
-   * (or `limits` itself) for no limit on that dimension.
-   *
-   * Priority on simultaneous trip (highest first): `turns`, `totalTokens`,
-   * `outputTokens`. The corresponding `stopReason` is `'limitTurns'`,
-   * `'limitTotalTokens'`, or `'limitOutputTokens'`.
+   * Priority when several trip at once (highest first): `turns`, `totalTokens`,
+   * `outputTokens`, with `stopReason` `'limitTurns'`, `'limitTotalTokens'`, or
+   * `'limitOutputTokens'`.
    */
-  limits?: {
-    /**
-     * Maximum number of agent loop iterations (turns). A turn is one model
-     * call plus any tool execution that follows. Counted against
-     * `metrics.latestAgentInvocation.cycles.length`.
-     */
-    turns?: number
-
-    /**
-     * Maximum cumulative model-generated tokens, summed across every model
-     * call in the agent loop
-     * (`metrics.latestAgentInvocation.usage.outputTokens`).
-     *
-     * Distinct from per-call provider-level `maxTokens` settings (e.g.
-     * `GoogleModelConfig.params.maxOutputTokens`), which bound a single
-     * model call's output. This cap bounds the loop's cumulative output
-     * across however many calls it makes.
-     *
-     * Soft cap: a single oversized model response can overshoot the budget.
-     * The agent stops at the first turn boundary on or after the budget is
-     * reached; it does not bound any individual model call.
-     */
-    outputTokens?: number
-
-    /**
-     * Maximum cumulative input + output tokens
-     * (`metrics.latestAgentInvocation.usage.totalTokens`). Each model
-     * call's input includes prior turns, so this counter compounds across
-     * the run — it approximates the total token spend you would be billed
-     * for.
-     *
-     * Soft cap: a single oversized model response can overshoot the budget.
-     * The agent stops at the first turn boundary on or after the budget is
-     * reached; it does not bound any individual model call.
-     */
-    totalTokens?: number
-  }
+  limits?: InvokeLimits
 }
 
 /**
- * The cap names recognized by {@link InvokeOptions.limits}.
+ * Limits for a single `invoke()` / `stream()` call, bounding the whole request
+ * it sets off. Each is optional; omit a field for no limit on that dimension.
+ * See {@link InvokeOptions.limits} for how they are scoped.
+ */
+export interface InvokeLimits {
+  /**
+   * Maximum number of agent loop iterations (turns) across the whole request. A
+   * turn is one model call plus any tool execution that follows.
+   */
+  turns?: number
+
+  /**
+   * Maximum cumulative model-generated tokens across every model call the
+   * request makes, sub-agents included. Distinct from per-call provider
+   * `maxTokens` settings (e.g. `GoogleModelConfig.params.maxOutputTokens`),
+   * which bound one call's output. Soft: a single oversized response can
+   * overshoot, since the agent only stops at the next turn boundary.
+   */
+  outputTokens?: number
+
+  /**
+   * Maximum cumulative input + output tokens across every model call the
+   * request makes, sub-agents included. Each call's input includes prior turns,
+   * so this compounds across the run — it approximates total token usage. Soft:
+   * a single oversized response can overshoot, since the agent only stops at the
+   * next turn boundary.
+   */
+  totalTokens?: number
+}
+
+/**
+ * Options for an SDK-internal agent invocation, carrying the request's shared
+ * {@link Invocation} so a descendant (sub-agent as a tool, multi-agent node) or
+ * an auxiliary call joins the enclosing limits and total. Not part of the public
+ * {@link InvokeOptions}: a hand-written tool cannot forward it, so a sub-agent it
+ * invokes directly runs under its own limits — the same as invoking that agent
+ * standalone.
+ *
+ * @internal
+ */
+export interface InternalInvokeOptions extends InvokeOptions {
+  /** The enclosing request's shared state to join, if any. */
+  invocation?: Invocation
+}
+
+/**
+ * The limit names recognized by {@link InvokeOptions.limits}.
  *
  * @internal
  */
