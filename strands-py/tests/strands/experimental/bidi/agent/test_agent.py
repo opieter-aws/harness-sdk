@@ -19,6 +19,9 @@ from strands.experimental.bidi.types import (
     BidiConnectionStopEvent,
     BidiMessage,
     BidiTranscriptDeltaEvent,
+    BidiTranscriptStartEvent,
+    InputStream,
+    OutputStream,
 )
 from strands.hooks import AfterToolCallEvent, BeforeToolCallEvent, MessageAddedEvent, MessageUpdatedEvent
 from strands.sandbox.not_a_sandbox_local_environment import NotASandboxLocalEnvironment
@@ -583,42 +586,87 @@ async def test_send_preserves_model_type_error(agent, input_data):
 
 
 @pytest.mark.asyncio
-async def test_bidi_agent_receive_events_from_model(agent):
+@pytest.mark.parametrize(
+    "events",
+    [
+        [],
+        [
+            BidiAudioDeltaEvent(audio="dGVzdA==", format="pcm", sample_rate=24000, channels=1, content_id="audio"),
+            BidiTranscriptStartEvent("assistant", content_id="assistant-transcript"),
+            BidiTranscriptDeltaEvent(delta="Hello world", role="assistant", content_id="assistant-transcript"),
+        ],
+    ],
+    ids=["empty", "content"],
+)
+async def test_bidi_agent_receive_events_from_model(agent, events):
     """Test receiving events from model."""
-    # Configure mock model to yield events
-    events = [
-        BidiAudioDeltaEvent(audio="dGVzdA==", format="pcm", sample_rate=24000, channels=1),
-        BidiTranscriptDeltaEvent(delta="Hello world", role="assistant", content_id="assistant-transcript"),
-    ]
     agent.model.set_events(events)
+    exp_events = [
+        BidiConnectionStartEvent(connection_id=unittest.mock.ANY, model=unittest.mock.ANY),
+        *events,
+        BidiConnectionStopEvent(connection_id=unittest.mock.ANY, reason="complete"),
+    ]
 
     await agent.start()
+    reader = agent.receive()
+    try:
+        tru_events = [await anext(reader) for _ in exp_events]
+        assert tru_events == exp_events
+    finally:
+        await reader.aclose()
+        await agent.stop()
 
-    received_events = []
-    async for event in agent.receive():
-        received_events.append(event)
-        if len(received_events) >= 4:  # Stop after getting expected events
-            break
 
-    # Verify event types and order
-    assert len(received_events) >= 3
-    assert isinstance(received_events[0], BidiConnectionStartEvent)
-    assert isinstance(received_events[1], BidiAudioDeltaEvent)
-    assert isinstance(received_events[2], BidiTranscriptDeltaEvent)
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure_source", ["input", "output"])
+async def test_run_failure_cancels_io_before_stop(agent, failure_source):
+    """I/O failures cancel active calls before stopping their streams."""
+    input_started = asyncio.Event()
+    output_started = asyncio.Event()
+    input_cancelled = asyncio.Event()
+    output_future = asyncio.get_running_loop().create_future()
+    error = RuntimeError("stream failed")
 
-    # Test empty events
-    agent.model.set_events([])
-    await agent.stop()
-    await agent.start()
+    async def wait_input():
+        input_started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            input_cancelled.set()
 
-    empty_events = []
-    async for event in agent.receive():
-        empty_events.append(event)
-        if len(empty_events) >= 2:
-            break
+    def wait_output(event):
+        output_started.set()
+        return output_future
 
-    assert len(empty_events) >= 1
-    assert isinstance(empty_events[0], BidiConnectionStartEvent)
+    async def stop_stream():
+        assert input_cancelled.is_set()
+        assert output_future.cancelled()
+
+    async def trigger_failure(*args):
+        await input_started.wait()
+        await output_started.wait()
+        raise error
+
+    input_stream = unittest.mock.AsyncMock(spec=InputStream, side_effect=wait_input)
+    output_stream = unittest.mock.Mock(spec=OutputStream, side_effect=wait_output)
+    for stream in [input_stream, output_stream]:
+        stream.stop.side_effect = stop_stream
+
+    inputs = [input_stream]
+    outputs = [output_stream]
+    if failure_source == "output":
+        outputs.append(trigger_failure)
+    else:
+        inputs.append(trigger_failure)
+
+    with pytest.raises(RuntimeError) as exc_info:
+        await asyncio.wait_for(agent.run(inputs=inputs, outputs=outputs), timeout=2)
+
+    assert exc_info.value is error
+    for stream in [input_stream, output_stream]:
+        stream.stop.assert_awaited_once()
+    assert not agent._started
+    assert not agent.model._started
 
 
 def test_bidi_agent_tool_integration(agent, mock_tool_registry):
