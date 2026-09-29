@@ -468,9 +468,11 @@ def create_harness(
             resolved_id = _sanitize_session_id(session_id) if session_id else uuid.uuid4().hex[:8]
             session_storage = LocalFileStorage(session_option.get("dir") or defaults.DEFAULT_SESSION_DIR)
             session_manager = SnapshotSessionManager(resolved_id, storage=session_storage, save_latest_on="message")
-            # Shared so the context manager's stash goes to files beside the session, not into the
-            # snapshot rewritten on every message.
-            agent_kwargs.setdefault("storage", session_storage)
+            # The context manager's stash goes to files, not into the snapshot rewritten on every message.
+            # Sharing the session's root is safe because storage namespaces each subsystem (``session/``,
+            # ``context/``).
+            if agent_kwargs.get("storage") is None:
+                agent_kwargs["storage"] = session_storage
 
     # Assemble plugins before the collision check so plugin-vended tools are checked too; consumer
     # plugins stay first so the tail is the harness's own.

@@ -883,6 +883,12 @@ def test_explicit_storage_backs_the_stash(tmp_path):
     assert agent.context_manager.stash_is_durable is False
 
 
+def test_storage_none_falls_back_to_the_session_storage(tmp_path):
+    agent = create_harness(storage=None, session={"dir": str(tmp_path)})
+    assert isinstance(agent.storage, LocalFileStorage)
+    assert agent.context_manager.stash_is_durable is True
+
+
 def test_skills_loaded_from_dir(tmp_path):
     _write_skill(tmp_path, "hello")
     agent = create_harness(skills=[str(tmp_path)])
