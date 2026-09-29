@@ -125,7 +125,7 @@ Run one writer per session id; if you fan out, add your own lock or route each i
 single worker.
 
 **Isolation is by namespace and scoped stores.** Storage auto-namespaces keys per
-subsystem (`session/`, `offloader/`) so data never collides, and long-term memory
+subsystem (`session/`, `context/`) so data never collides, and long-term memory
 supports a scoped store per tenant rather than one shared store. The session directory
 is a trusted data store: restrict filesystem permissions to the agent process, and note
 the Strands Harness SDK does not block symlinks inside it.

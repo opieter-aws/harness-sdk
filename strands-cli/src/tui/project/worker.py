@@ -181,6 +181,16 @@ def local_session_directory(storage):
     return str(Path(storage._base_dir, *parts).resolve())
 
 
+def local_stash_directory(agent):
+    stash = getattr(getattr(agent, "context_manager", None), "stash", None)
+    base_directory = local_session_directory(getattr(stash, "_base_storage", None))
+    namespace = getattr(getattr(stash, "_storage", None), "_prefix", "")
+    if base_directory is None or not namespace:
+        return None
+    # The namespace's first segment holds every session's stash, not just this agent's.
+    return str(Path(base_directory, namespace.split("/")[0]))
+
+
 class Runtime:
     def __init__(self, module, command):
         self.module = module
@@ -363,6 +373,7 @@ class Runtime:
         )
         storage = manager._storage if isinstance(manager, SnapshotSessionManager) else None
         session_directory = local_session_directory(storage)
+        stash_directory = local_stash_directory(self.agent)
         managed_session = session_directory is not None
         skills = self.skills()
         active = skills.get_activated_skills(self.agent) if skills else []
@@ -404,6 +415,7 @@ class Runtime:
             "messages": display_messages(self.agent),
             "privatePaths": [
                 *([session_directory] if session_directory else []),
+                *([stash_directory] if stash_directory else []),
                 str(Path(self.options.get("memory_dir", ".agent/memory")).resolve()),
             ],
             "tools": [
