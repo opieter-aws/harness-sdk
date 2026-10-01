@@ -36,7 +36,7 @@ import {
 import { BedrockModel } from '../../models/bedrock.js'
 import { StructuredOutputError } from '../../errors.js'
 import { expectLoopMetrics } from '../../__fixtures__/metrics-helpers.js'
-import { expectAgentResult } from '../../__fixtures__/agent-helpers.js'
+import { anyInvocation, expectAgentResult } from '../../__fixtures__/agent-helpers.js'
 import { anyTrackingId } from '../../__fixtures__/message-helpers.js'
 import type { StreamOptions } from '../../index.js'
 import type { ModelStreamEvent } from '../../models/streaming.js'
@@ -73,7 +73,9 @@ describe('Agent', () => {
 
         expect(items.length).toBeGreaterThan(0)
         const firstItem = items[0]
-        expect(firstItem).toEqual(new BeforeInvocationEvent({ agent: agent, invocationState: {} }))
+        expect(firstItem).toEqual(
+          new BeforeInvocationEvent({ agent: agent, invocation: anyInvocation, invocationState: {} })
+        )
       })
 
       it('returns AgentResult as generator return value', async () => {
@@ -151,6 +153,7 @@ describe('Agent', () => {
 
         expect(beforeTools).toEqual(
           new BeforeToolsEvent({
+            invocation: anyInvocation,
             agent: agent,
             message: new Message({
               role: 'assistant',

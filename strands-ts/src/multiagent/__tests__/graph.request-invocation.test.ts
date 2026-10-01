@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { Agent } from '../../agent/agent.js'
-import { readInvocation, type Invocation } from '../../agent/invocation.js'
+import { toInternal, type InternalInvocation } from '../../agent/invocation.js'
 import { AfterInvocationEvent } from '../../hooks/events.js'
 import { MockMessageModel } from '../../__fixtures__/mock-message-model.js'
 import { Graph } from '../graph.js'
@@ -25,10 +25,10 @@ describe('Graph request-wide invocation', () => {
     })
 
     // Capture the shared Invocation from the last node's after-invocation hook,
-    // where it is linked to the event.
-    let shared: Invocation | undefined
+    // where it is attached to the event.
+    let shared: InternalInvocation | undefined
     agentB.addHook(AfterInvocationEvent, (event) => {
-      shared = readInvocation(event)
+      shared = toInternal(event.invocation)
     })
 
     const graph = new Graph({

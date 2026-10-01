@@ -26,7 +26,7 @@ import { InvokeModelStage } from '../../middleware/stages.js'
 import { Model } from '../model.js'
 import { cloneSystemPrompt, type Message, type SystemPrompt } from '../../types/messages.js'
 import { deepCopy, deepCopyWithValidation, type JSONValue } from '../../types/json.js'
-import { linkInvocation, readInvocation, type Invocation } from '../../agent/invocation.js'
+import type { Invocation } from '../../agent/invocation.js'
 import type { InvokeModelContext } from '../../middleware/stages.js'
 import type { Plugin } from '../../plugins/plugin.js'
 import type { ToolSpec } from '../../tools/types.js'
@@ -227,7 +227,7 @@ export class ModelRouter implements Plugin {
         context.systemPrompt,
         [...context.toolSpecs],
         context.invocationState,
-        readInvocation(context)
+        context.invocation
       )
       state = await this._openAndCache(context.agent, context.invocationState, routingContext)
     }
@@ -301,7 +301,7 @@ export class ModelRouter implements Plugin {
         context.systemPrompt,
         context.toolSpecs,
         context.invocationState,
-        readInvocation(context),
+        context.invocation,
         []
       )
     )
@@ -358,7 +358,7 @@ export class ModelRouter implements Plugin {
         event.agent.systemPrompt,
         event.agent.toolRegistry.list().map((tool) => tool.toolSpec),
         event.invocationState,
-        readInvocation(event),
+        event.invocation,
         state.attempts
       )
 
@@ -429,8 +429,8 @@ export class ModelRouter implements Plugin {
       candidates: this._candidates,
       invocationState,
       attempts: Object.freeze([...attempts]),
+      ...(invocation && { invocation }),
     }
-    linkInvocation(context, invocation)
     return Object.freeze(context)
   }
 

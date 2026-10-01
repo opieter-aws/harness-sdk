@@ -61,13 +61,13 @@
  */
 
 import { Agent } from '../../agent/agent.js'
-import { createAuxiliaryInvocation, readInvocation, type Invocation } from '../../agent/invocation.js'
+import { createAuxiliaryInvocation, type Invocation } from '../../agent/invocation.js'
 import { AfterInvocationEvent, BeforeInvocationEvent, BeforeModelCallEvent } from '../../hooks/events.js'
 import { logger } from '../../logging/logger.js'
 import { warnOnce } from '../../logging/warn-once.js'
 import type { Model } from '../../models/model.js'
 import type { Plugin } from '../../plugins/plugin.js'
-import type { InternalInvokeOptions, LocalAgent } from '../../types/agent.js'
+import type { InvokeOptions, LocalAgent } from '../../types/agent.js'
 import type { ContentBlock, Message } from '../../types/messages.js'
 import type { Snapshot } from '../../types/snapshot.js'
 import { JUDGE_OUTCOME_SCHEMA, JUDGE_SYSTEM_PROMPT, buildJudgePrompt } from './judge.js'
@@ -352,7 +352,7 @@ export class GoalLoop implements Plugin {
 
       let outcome: ValidationOutcome
       try {
-        outcome = await validator(response, readInvocation(event))
+        outcome = await validator(response, event.invocation)
       } catch (validatorError) {
         // Surface validator throws so a buggy validator (e.g. a TypeError that
         // fails identically on every attempt) is visible in logs rather than
@@ -416,7 +416,7 @@ export class GoalLoop implements Plugin {
       // Fold the judge's tokens into the request total without limiting this
       // auxiliary call by the request's limits.
       const auxiliaryInvocation = createAuxiliaryInvocation(invocation)
-      const invokeOptions: InternalInvokeOptions = {
+      const invokeOptions: InvokeOptions = {
         structuredOutputSchema: JUDGE_OUTCOME_SCHEMA,
         ...(auxiliaryInvocation && { invocation: auxiliaryInvocation }),
       }

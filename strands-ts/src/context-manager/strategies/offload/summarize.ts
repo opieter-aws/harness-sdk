@@ -8,7 +8,7 @@ import { logger } from '../../../logging/logger.js'
 import { Message, TextBlock, ToolResultBlock } from '../../../types/messages.js'
 import type { ContentBlock } from '../../../types/messages.js'
 import type { Model } from '../../../models/model.js'
-import { readInvocation, type Invocation } from '../../../agent/invocation.js'
+import type { Invocation } from '../../../agent/invocation.js'
 import type { LocalAgent } from '../../../types/agent.js'
 import type { ContextStrategy, ContextState } from '../../types.js'
 import {
@@ -73,7 +73,7 @@ export class SummarizeStrategy extends BaseOffloadStrategy {
     if (safe.length === 0) return false
 
     const contentBlocks = flattenMessagesToContent(safe)
-    const summary = await summarizeContent(contentBlocks, model, this._config, readInvocation(context))
+    const summary = await summarizeContent(contentBlocks, model, this._config, context.invocation)
     if (!summary) return false
 
     const totalTokens = await model.countTokens(safe)

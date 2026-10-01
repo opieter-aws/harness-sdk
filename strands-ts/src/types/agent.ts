@@ -138,11 +138,20 @@ export interface InvokeOptions {
   cancelSignal?: AbortSignal
 
   /**
+   * Runs this call as part of an enclosing request, sharing its limits and usage
+   * total. Take it from the {@link Invocation} on a hook event or
+   * {@link ToolContext.invocation}. When set, `limits` must be omitted: a nested
+   * agent inherits the enclosing request's limits.
+   */
+  invocation?: Invocation
+
+  /**
    * Limits bounding the whole request this `invoke()` / `stream()` call sets
    * off: this agent's loop, sub-agents added via `asTool()`, and any nested
    * Graph/Swarm all share them. A hand-written tool that invokes another agent
-   * directly is not covered — that sub-agent runs under its own limits, as if
-   * invoked standalone. Auxiliary model calls (summarization, routing,
+   * joins only by forwarding {@link ToolContext.invocation} as
+   * {@link InvokeOptions.invocation}; otherwise that sub-agent runs under its own
+   * limits, as if invoked standalone. Auxiliary model calls (summarization, routing,
    * extraction, steering, HITL, goal judging) add their tokens to the shared
    * total but are not turn-limited. Counters reset on each reuse of the agent.
    *
@@ -187,21 +196,6 @@ export interface InvokeLimits {
    * next turn boundary.
    */
   totalTokens?: number
-}
-
-/**
- * Options for an SDK-internal agent invocation, carrying the request's shared
- * {@link Invocation} so a descendant (sub-agent as a tool, multi-agent node) or
- * an auxiliary call joins the enclosing limits and total. Not part of the public
- * {@link InvokeOptions}: a hand-written tool cannot forward it, so a sub-agent it
- * invokes directly runs under its own limits — the same as invoking that agent
- * standalone.
- *
- * @internal
- */
-export interface InternalInvokeOptions extends InvokeOptions {
-  /** The enclosing request's shared state to join, if any. */
-  invocation?: Invocation
 }
 
 /**

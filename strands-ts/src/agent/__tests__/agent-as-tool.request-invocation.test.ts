@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { Agent } from '../agent.js'
-import { readInvocation } from '../invocation.js'
+import { toInternal } from '../invocation.js'
 import { BeforeModelCallEvent } from '../../hooks/events.js'
 import { MockMessageModel } from '../../__fixtures__/mock-message-model.js'
 
@@ -15,7 +15,7 @@ describe('AgentAsTool request-wide invocation', () => {
     let innerSawInvocation = false
     let innerSeenOutputTokens: number | undefined
     inner.addHook(BeforeModelCallEvent, (event) => {
-      const invocation = readInvocation(event)
+      const invocation = toInternal(event.invocation)
       innerSawInvocation = invocation !== undefined
       innerSeenOutputTokens = invocation?.usage.outputTokens
     })

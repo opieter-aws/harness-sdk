@@ -6,7 +6,7 @@
  */
 
 import type { Plugin } from '../plugins/plugin.js'
-import { linkInvocation, readInvocation } from '../agent/invocation.js'
+import type { Invocation } from '../agent/invocation.js'
 import type { LocalAgent } from '../types/agent.js'
 import { AfterModelCallEvent, BeforeModelCallEvent } from '../hooks/events.js'
 import { ContextWindowOverflowError } from '../errors.js'
@@ -48,6 +48,9 @@ export type ConversationManagerReduceOptions = {
    * proceeds regardless.
    */
   error?: ContextWindowOverflowError
+
+  /** The request this reduction belongs to, if any. See {@link InvokeOptions.invocation}. */
+  readonly invocation?: Invocation
 }
 
 /**
@@ -172,8 +175,8 @@ export abstract class ConversationManager implements Plugin {
           agent: event.agent,
           model: event.model,
           error: event.error,
+          ...(event.invocation && { invocation: event.invocation }),
         }
-        linkInvocation(reduceOptions, readInvocation(event))
         if (await this.reduce(reduceOptions)) {
           event.retry = true
         }
@@ -196,8 +199,11 @@ export abstract class ConversationManager implements Plugin {
           `projected_tokens=<${event.projectedInputTokens}>, ratio=<${ratio.toFixed(2)}>, compression_threshold=<${this._compressionThreshold}> | compression threshold exceeded, reducing context`
         )
         // Proactive compression is best-effort: swallow errors so the model call can still proceed.
-        const reduceOptions: ConversationManagerReduceOptions = { agent: event.agent, model: event.model }
-        linkInvocation(reduceOptions, readInvocation(event))
+        const reduceOptions: ConversationManagerReduceOptions = {
+          agent: event.agent,
+          model: event.model,
+          ...(event.invocation && { invocation: event.invocation }),
+        }
         try {
           await this.reduce(reduceOptions)
         } catch (e) {

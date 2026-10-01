@@ -1,4 +1,4 @@
-import type { Invocation } from '../agent/invocation.js'
+import { toInternal, type Invocation } from '../agent/invocation.js'
 import type { ContentBlock, Message } from '../types/messages.js'
 import type { Model, StreamAggregatedResult, StreamOptions } from './model.js'
 import { accumulateUsage, type ModelStreamEvent } from './streaming.js'
@@ -54,8 +54,9 @@ export class ModelProxy {
    */
   private _record(result: StreamAggregatedResult, invocation?: Invocation): void {
     const usage = result?.metadata?.usage
-    if (usage !== undefined && invocation !== undefined) {
-      accumulateUsage(invocation.usage, usage)
+    const internal = toInternal(invocation)
+    if (usage !== undefined && internal !== undefined) {
+      accumulateUsage(internal.usage, usage)
     }
   }
 }

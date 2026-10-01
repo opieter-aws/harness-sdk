@@ -13,6 +13,7 @@ import { StateStore } from '../state-store.js'
 import type { JSONValue } from '../types/json.js'
 import { ToolRegistry } from '../registry/tool-registry.js'
 import { defaultSandbox } from '../sandbox/default.js'
+import { InternalInvocation, type Invocation } from '../agent/invocation.js'
 import type { Sandbox } from '../sandbox/base.js'
 import type { HookableEvent, StreamEvent } from '../hooks/events.js'
 import type { HookableEventConstructor, HookCallback } from '../hooks/types.js'
@@ -253,3 +254,6 @@ export function createCancellableAgent(
     },
   }
 }
+
+/** Matches the request handle the agent attaches to every event it emits. */
+export const anyInvocation = expect.any(InternalInvocation) as unknown as Invocation
