@@ -1,7 +1,6 @@
 import type { ToolSpec, ToolUse } from './types.js'
 import { TextBlock, ToolResultBlock } from '../types/messages.js'
 import type { InvocationState, LocalAgent } from '../types/agent.js'
-import type { Invocation } from '../agent/invocation.js'
 import { normalizeError } from '../errors.js'
 import type { Interruptible } from '../interrupt.js'
 
@@ -37,16 +36,6 @@ export interface ToolContext extends Interruptible {
 
   /** Execution-scoped cancellation signal for this tool call. */
   cancelSignal: AbortSignal
-
-  /**
-   * The in-flight request's shared state, stamped by the tool executor so an
-   * SDK-vended tool that runs an auxiliary model call folds its tokens into the
-   * request total. Assigned non-enumerably; a hand-written tool does not forward
-   * it, so a sub-agent it invokes directly is not counted.
-   *
-   * @internal
-   */
-  invocation?: Invocation
 }
 
 /**

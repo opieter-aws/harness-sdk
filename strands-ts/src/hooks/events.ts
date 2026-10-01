@@ -1,5 +1,4 @@
 import type { LocalAgent, AgentResult, InvocationState, InvokeArgs } from '../types/agent.js'
-import type { Invocation } from '../agent/invocation.js'
 import type { ContentBlock, Message, StopReason, ToolResultBlock } from '../types/messages.js'
 import { type Tool, ToolStreamEvent } from '../tools/tool.js'
 import type { JSONValue } from '../types/json.js'
@@ -79,17 +78,7 @@ import type { InterruptParams } from '../types/interrupt.js'
  * Base class for all events yielded by `agent.stream()`.
  * Carries no hookability — subclasses that should be hookable extend {@link HookableEvent} instead.
  */
-export abstract class StreamEvent {
-  /**
-   * The in-flight request's shared state, stamped by the agent when it
-   * dispatches the event so a hook running an auxiliary or out-of-loop model
-   * call can fold that call's tokens into the request total. Declared type-only
-   * and assigned non-enumerably, so it stays off enumeration and serialization.
-   *
-   * @internal
-   */
-  declare readonly invocation?: Invocation
-}
+export abstract class StreamEvent {}
 
 /**
  * Base class for events that can be subscribed to via the hook system.

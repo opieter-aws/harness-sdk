@@ -13,7 +13,7 @@ import {
   ReasoningBlock,
 } from '../../../types/messages.js'
 import type { ContentBlock } from '../../../types/messages.js'
-import type { Invocation } from '../../../agent/invocation.js'
+import { readInvocation, type Invocation } from '../../../agent/invocation.js'
 import type { LocalAgent } from '../../../types/agent.js'
 import type { ContextStrategy, ContextState } from '../../types.js'
 import type { Stash } from '../../stash.js'
@@ -346,7 +346,8 @@ export abstract class BaseOffloadStrategy implements ContextStrategy {
 
   /** Per-block execution: walk each message, transform individual blocks above threshold. */
   private async _applyPerBlock(context: ContextState): Promise<boolean> {
-    const { messages, agent, invocation } = context
+    const { messages, agent } = context
+    const invocation = readInvocation(context)
     const toolNameMap = buildToolNameMap(messages)
     const eligible =
       this._preserveRecent > 0

@@ -10,7 +10,7 @@ import type { ContentBlock, SystemPrompt } from '../../../types/messages.js'
 import { CachePointBlock, TextBlock } from '../../../types/messages.js'
 import type { ToolUse } from '../../../tools/types.js'
 import type { BeforeToolCallEvent } from '../../../hooks/events.js'
-import { deriveAuxiliaryInvocation, type Invocation } from '../../../agent/invocation.js'
+import { createAuxiliaryInvocation, readInvocation, type Invocation } from '../../../agent/invocation.js'
 import type { InternalInvokeOptions } from '../../../types/agent.js'
 import type { SteeringContextData, SteeringContextProvider } from '../providers/context-provider.js'
 import { ToolLedgerProvider } from '../providers/tool-ledger.js'
@@ -206,7 +206,7 @@ export class LLMSteeringHandler extends SteeringHandler {
   override async beforeToolCall(event: BeforeToolCallEvent): Promise<Proceed | Guide | Confirm> {
     const context = this.getSteeringContext()
     const prompt = this._promptBuilder(context, event.toolUse)
-    const decision = await this._invoke(prompt, this._configuredModel ?? event.agent.auxModel, event.invocation)
+    const decision = await this._invoke(prompt, this._configuredModel ?? event.agent.auxModel, readInvocation(event))
 
     switch (decision.type) {
       case 'proceed':
@@ -230,7 +230,7 @@ export class LLMSteeringHandler extends SteeringHandler {
     })
     // Fold the steering call's tokens into the request total without limiting this
     // auxiliary call by the request's limits.
-    const auxiliaryInvocation = deriveAuxiliaryInvocation(invocation)
+    const auxiliaryInvocation = createAuxiliaryInvocation(invocation)
     const invokeOptions: InternalInvokeOptions = {
       ...(auxiliaryInvocation && { invocation: auxiliaryInvocation }),
     }

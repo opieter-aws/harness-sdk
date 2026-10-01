@@ -26,7 +26,7 @@ import type { HookCallback, HookableEventConstructor, HookCleanup } from '../hoo
 import type { MultiAgentPlugin } from './plugins.js'
 import type { SessionManager } from '../session/session-manager.js'
 import { MultiAgentPluginRegistry } from './plugins.js'
-import type { NodeDefinition } from './nodes.js'
+import type { InternalNodeInputOptions, NodeDefinition } from './nodes.js'
 import { AgentNode, MultiAgentNode, Node } from './nodes.js'
 import { MultiAgentState, MultiAgentResult, NodeResult, Status } from './state.js'
 import type { MultiAgent } from './multiagent.js'
@@ -551,14 +551,13 @@ export class Graph implements MultiAgent {
     const cancelSignal = signals.length > 0 ? AbortSignal.any(signals) : undefined
 
     try {
-      const gen = this._tracer.withSpanContext(nodeSpan, () =>
-        node.stream(input, state, {
-          invocationState,
-          invocation,
-          ...(cancelSignal && { cancelSignal }),
-          ...(this._canRunConcurrently && { bufferOutput: true }),
-        })
-      )
+      const nodeOptions: InternalNodeInputOptions = {
+        invocationState,
+        invocation,
+        ...(cancelSignal && { cancelSignal }),
+        ...(this._canRunConcurrently && { bufferOutput: true }),
+      }
+      const gen = this._tracer.withSpanContext(nodeSpan, () => node.stream(input, state, nodeOptions))
       let next = await this._tracer.withSpanContext(nodeSpan, () => gen.next())
       while (!next.done) {
         await queue.send({ type: 'event', node, event: next.value })

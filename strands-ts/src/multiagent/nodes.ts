@@ -52,17 +52,22 @@ export interface NodeInputOptions {
   cancelSignal?: AbortSignal
 
   /**
-   * The request's shared state, forwarded to the node's underlying
-   * agent so its usage folds into the whole run's total.
-   * @internal
-   */
-  invocation?: Invocation
-
-  /**
    * Buffer the agent's printer output and flush it on completion so concurrent siblings
    * don't interleave on stdout.
    */
   bufferOutput?: boolean
+}
+
+/**
+ * {@link NodeInputOptions} as passed by the SDK's orchestrators, carrying the
+ * enclosing request's shared state. Kept off the public options so a custom
+ * node or caller cannot join a foreign request.
+ *
+ * @internal
+ */
+export interface InternalNodeInputOptions extends NodeInputOptions {
+  /** The request's shared state, forwarded to the node's underlying agent or orchestrator. */
+  invocation?: Invocation
 }
 
 /**
@@ -271,6 +276,7 @@ export class AgentNode extends Node {
     // Resolve once per handle() call — Node.stream() normally supplies this;
     // handle() is public API, so direct callers get per-call state.
     const invocationState: InvocationState = options?.invocationState ?? {}
+    const invocation = (options as InternalNodeInputOptions | undefined)?.invocation
 
     // Only Agent instances support snapshot/restore for state isolation.
     // When `preserveContext` is set, skip the snapshot/restore cycle so the agent
@@ -303,7 +309,7 @@ export class AgentNode extends Node {
       const invokeOptions: InternalInvokeOptions = {
         ...(options?.structuredOutputSchema && { structuredOutputSchema: options.structuredOutputSchema }),
         ...(options?.cancelSignal && { cancelSignal: options.cancelSignal }),
-        ...(options?.invocation && { invocation: options.invocation }),
+        ...(invocation && { invocation }),
         invocationState,
       }
 
@@ -399,11 +405,12 @@ export class MultiAgentNode extends Node {
     // Resolve once per handle() call — Node.stream() normally supplies this;
     // handle() is public API, so direct callers get per-call state.
     const invocationState: InvocationState = options?.invocationState ?? {}
+    const invocation = (options as InternalNodeInputOptions | undefined)?.invocation
 
     const nestedOptions: MultiAgentInternalInvokeOptions = {
       invocationState,
       ...(options?.cancelSignal && { cancelSignal: options.cancelSignal }),
-      ...(options?.invocation && { invocation: options.invocation }),
+      ...(invocation && { invocation }),
     }
     const gen = this._orchestrator.stream(input, nestedOptions)
     let next = await gen.next()

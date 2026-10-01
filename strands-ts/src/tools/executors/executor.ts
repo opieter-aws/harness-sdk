@@ -3,7 +3,7 @@ import { AfterToolCallEvent, BeforeToolCallEvent, ToolStreamUpdateEvent } from '
 import { InterruptError, interruptFromAgent } from '../../interrupt.js'
 import { createMiddlewareInterrupt } from '../../middleware/interrupt.js'
 import { ExecuteToolStage } from '../../middleware/index.js'
-import { attachInvocation } from '../../agent/invocation.js'
+import { linkInvocation } from '../../agent/invocation.js'
 import { deepCopy } from '../../types/json.js'
 import { TextBlock, ToolResultBlock } from '../../types/messages.js'
 
@@ -174,7 +174,8 @@ export abstract class ToolExecutor {
             toolUse,
             invocationState,
             options.backgroundTaskPassId!,
-            effectiveTool!
+            effectiveTool!,
+            options.invocation
           ),
           toolUseBlock.toolUseId
         )
@@ -332,9 +333,7 @@ export abstract class ToolExecutor {
               : interruptFromAgent<T>(options.agent, `tool:${toolUse.toolUseId}:${params.name}`, params, 'tool'),
         }
 
-        if (options.invocation !== undefined) {
-          attachInvocation(toolContext, options.invocation)
-        }
+        linkInvocation(toolContext, options.invocation)
 
         // Iterate manually to wrap raw tool events at the agent boundary and
         // re-enter the tool span for every asynchronous step.

@@ -10,7 +10,6 @@ import type {
 import type { Message, SystemPrompt, ToolResultBlock } from '../types/messages.js'
 import type { ToolSpec, ToolChoice } from '../tools/types.js'
 import type { Model, StreamAggregatedResult } from '../models/model.js'
-import type { Invocation } from '../agent/invocation.js'
 import type { ToolUseData } from '../hooks/events.js'
 import type { Tool } from '../tools/tool.js'
 import type { InterruptParams } from '../types/interrupt.js'
@@ -88,13 +87,6 @@ export interface InvokeModelContext {
   readonly toolChoice?: ToolChoice
   /** Per-invocation state. Shared by reference — mutations are visible to hooks, tools, and AgentResult. */
   readonly invocationState: InvocationState
-  /**
-   * The in-flight request's shared state, so a routing strategy running a
-   * classifier model call folds its tokens into the request total.
-   *
-   * @internal
-   */
-  readonly invocation?: Invocation
   /** Estimated input token count for this model call, or undefined if estimation failed. */
   readonly projectedInputTokens?: number
 

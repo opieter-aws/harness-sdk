@@ -6,7 +6,7 @@
 
 import type { Plugin } from '../plugins/plugin.js'
 import type { Tool } from '../tools/tool.js'
-import type { Invocation } from '../agent/invocation.js'
+import { linkInvocation, readInvocation, type Invocation } from '../agent/invocation.js'
 import type { LocalAgent } from '../types/agent.js'
 import { AfterModelCallEvent, BeforeModelCallEvent, MessageAddedEvent } from '../hooks/events.js'
 import { ContextWindowOverflowError } from '../errors.js'
@@ -154,7 +154,7 @@ export class ContextManager implements Plugin {
     }
 
     agent.addHook(BeforeModelCallEvent, async (event) => {
-      await this._runStrategies(event.agent, event.projectedInputTokens, undefined, event.invocation)
+      await this._runStrategies(event.agent, event.projectedInputTokens, undefined, readInvocation(event))
     })
 
     // Assumes sequential invocations on this agent (no concurrent calls)
@@ -171,7 +171,7 @@ export class ContextManager implements Plugin {
         return
       }
 
-      const acted = await this._runStrategies(event.agent, undefined, true, event.invocation)
+      const acted = await this._runStrategies(event.agent, undefined, true, readInvocation(event))
       if (!acted) {
         logger.warn(`agentId=<${event.agent.id}> | no strategy made progress, skipping retry`)
         return
@@ -216,8 +216,8 @@ export class ContextManager implements Plugin {
       utilization: agent.model.estimateUtilization(inputTokens),
       ...(overflow ? { overflow: true } : {}),
       ...(this._stash ? { stash: this._stash } : {}),
-      ...(invocation ? { invocation } : {}),
     }
+    linkInvocation(strategyContext, invocation)
 
     let anyActed = false
     for (const strategy of this._strategies) {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { Agent } from '../agent.js'
-import { createInvocation, deriveAuxiliaryInvocation } from '../invocation.js'
+import { createInvocation, createAuxiliaryInvocation, readInvocation } from '../invocation.js'
+import { BeforeModelCallEvent } from '../../hooks/events.js'
 import { tool } from '../../tools/tool-factory.js'
 import type { InternalInvokeOptions } from '../../types/agent.js'
 import type { ToolContext } from '../../tools/tool.js'
@@ -116,12 +117,67 @@ describe('Agent request-wide limits', () => {
     })
 
     const result = await aux.invoke('go', {
-      invocation: deriveAuxiliaryInvocation(parentInvocation),
+      invocation: createAuxiliaryInvocation(parentInvocation),
     } as InternalInvokeOptions)
 
     // The auxiliary agent runs to completion despite the spent limit...
     expect(result.stopReason).toBe('endTurn')
     // ...and its tokens fold into the shared request total.
     expect(parentInvocation.usage).toEqual({ inputTokens: 5, outputTokens: 7, totalTokens: 12 })
+  })
+
+  it('links the request state to the events and tool context it hands out without exposing it on them', async () => {
+    let probeContext: ToolContext | undefined
+    const probe = tool({
+      name: 'probe',
+      description: 'captures its tool context',
+      callback: (_input: unknown, context: ToolContext) => {
+        probeContext = context
+        return 'ok'
+      },
+    })
+    const agent = new Agent({
+      model: new MockMessageModel()
+        .addTurn({ type: 'toolUseBlock', name: 'probe', toolUseId: 'tu-1', input: {} })
+        .addTurn({ type: 'textBlock', text: 'done' }),
+      tools: [probe],
+      printer: false,
+    })
+    const modelCallEvents: BeforeModelCallEvent[] = []
+    agent.addHook(BeforeModelCallEvent, (event) => {
+      modelCallEvents.push(event)
+    })
+
+    await agent.invoke('go')
+
+    const invocation = readInvocation(modelCallEvents[0])
+    expect(invocation).toBeDefined()
+    expect(readInvocation(modelCallEvents[1])).toBe(invocation)
+    expect(readInvocation(probeContext)).toBe(invocation)
+    expect('invocation' in modelCallEvents[0]!).toBe(false)
+    expect('invocation' in probeContext!).toBe(false)
+  })
+
+  it('starts fresh request state on each root invoke of a reused agent', async () => {
+    const agent = new Agent({
+      model: new MockMessageModel()
+        .addTurn({ type: 'textBlock', text: 'first' })
+        .addTurn({ type: 'textBlock', text: 'second' }),
+      printer: false,
+    })
+    const modelCallEvents: BeforeModelCallEvent[] = []
+    agent.addHook(BeforeModelCallEvent, (event) => {
+      modelCallEvents.push(event)
+    })
+
+    await agent.invoke('one')
+    await agent.invoke('two')
+
+    const firstInvocation = readInvocation(modelCallEvents[0])
+    const secondInvocation = readInvocation(modelCallEvents[1])
+    expect(firstInvocation).toBeDefined()
+    expect(secondInvocation).toBeDefined()
+    expect(secondInvocation).not.toBe(firstInvocation)
+    expect(secondInvocation?.turns).toBe(1)
   })
 })
