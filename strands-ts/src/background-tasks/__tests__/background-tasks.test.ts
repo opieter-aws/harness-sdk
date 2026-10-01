@@ -3,7 +3,7 @@ import { z } from 'zod'
 
 import { MockMessageModel } from '../../__fixtures__/mock-message-model.js'
 import { Agent } from '../../agent/agent.js'
-import { readInvocation, type Invocation } from '../../agent/invocation.js'
+import type { Invocation } from '../../agent/invocation.js'
 import { AfterToolCallEvent, BeforeModelCallEvent, BeforeToolCallEvent, InitializedEvent } from '../../hooks/events.js'
 import { Interrupt } from '../../interrupt.js'
 import { ExecuteToolStage, InvokeModelStage } from '../../middleware/index.js'
@@ -225,7 +225,7 @@ describe('BackgroundTasks', () => {
       inputSchema: z.object({}),
       callback: (_input, context) => {
         probeRan = true
-        probeInvocation = readInvocation(context)
+        probeInvocation = context?.invocation
         return 'probed'
       },
     })
@@ -243,7 +243,7 @@ describe('BackgroundTasks', () => {
     })
     let submittingInvocation: Invocation | undefined
     agent.addHook(BeforeModelCallEvent, (event) => {
-      submittingInvocation ??= readInvocation(event)
+      submittingInvocation ??= event?.invocation
     })
 
     await agent.invoke('Run both.')

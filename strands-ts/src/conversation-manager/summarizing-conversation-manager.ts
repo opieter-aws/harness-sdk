@@ -6,7 +6,7 @@
  * than simply discarding it.
  */
 
-import { readInvocation, type Invocation } from '../agent/invocation.js'
+import type { Invocation } from '../agent/invocation.js'
 import type { LocalAgent } from '../types/agent.js'
 import {
   ConversationManager,
@@ -112,7 +112,7 @@ export class SummarizingConversationManager extends ConversationManager {
   async reduce(options: ConversationManagerReduceOptions): Promise<boolean> {
     const { agent, error } = options
     try {
-      return await this._summarizeOldest(agent, this._model ?? agent.auxModel, readInvocation(options))
+      return await this._summarizeOldest(agent, this._model ?? agent.auxModel, options.invocation)
     } catch (summarizationError) {
       if (error) {
         // Reactive: rethrow so the ContextWindowOverflowError propagates

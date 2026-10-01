@@ -57,20 +57,11 @@ export interface MultiAgentInvokeOptions {
    * an exceptional exit, not a normal terminal state.
    */
   cancelSignal?: AbortSignal
-}
 
-/**
- * Orchestrator invoke options carrying the enclosing request's shared state.
- *
- * A nested orchestrator (wrapped by {@link MultiAgentNode}) receives the parent's
- * {@link Invocation} through this channel so its nodes fold into one usage total. It is
- * kept off the public {@link MultiAgentInvokeOptions} so an external caller cannot join a
- * foreign request's state.
- *
- * @internal
- */
-export interface MultiAgentInternalInvokeOptions extends MultiAgentInvokeOptions {
-  /** The enclosing request's shared state to join, if any. */
+  /**
+   * Runs this orchestration as part of an enclosing request, so every node's
+   * agent shares its limits and usage total. See {@link InvokeOptions.invocation}.
+   */
   invocation?: Invocation
 }
 

@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import { Agent } from '../../agent/agent.js'
-import { createAuxiliaryInvocation, readInvocation } from '../../agent/invocation.js'
-import type { InternalInvokeOptions } from '../../types/agent.js'
+import { createAuxiliaryInvocation } from '../../agent/invocation.js'
+import type { InvokeOptions } from '../../types/agent.js'
 import type { BeforeToolCallEvent } from '../../hooks/events.js'
 import type { Model } from '../../models/model.js'
 
@@ -91,8 +91,8 @@ export function createLlmRiskClassifier(config?: LlmClassifierConfig): HumanInTh
     const prompt = `Should this tool call require human approval?\n\nTool: ${event.toolUse.name}\nInput: ${JSON.stringify(event.toolUse.input, null, 2)}`
     // Fold the classifier's tokens into the request total without limiting this
     // auxiliary call by the request's limits.
-    const auxiliaryInvocation = createAuxiliaryInvocation(readInvocation(event))
-    const invokeOptions: InternalInvokeOptions = {
+    const auxiliaryInvocation = createAuxiliaryInvocation(event.invocation)
+    const invokeOptions: InvokeOptions = {
       ...(auxiliaryInvocation && { invocation: auxiliaryInvocation }),
     }
     const result = await inner.invoke(prompt, invokeOptions)

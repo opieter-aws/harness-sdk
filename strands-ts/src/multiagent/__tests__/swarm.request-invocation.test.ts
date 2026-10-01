@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { Agent } from '../../agent/agent.js'
-import { readInvocation, type Invocation } from '../../agent/invocation.js'
+import { toInternal, type InternalInvocation } from '../../agent/invocation.js'
 import { AfterInvocationEvent } from '../../hooks/events.js'
 import { MockMessageModel } from '../../__fixtures__/mock-message-model.js'
 import type { JSONValue } from '../../types/json.js'
@@ -33,10 +33,10 @@ describe('Swarm request-wide invocation', () => {
     const agentB = makeHandoffAgent('b', undefined, { inputTokens: 20, outputTokens: 35, totalTokens: 55 })
 
     // Capture the shared Invocation from the terminal node's after-invocation
-    // hook, where it is linked to the event.
-    let shared: Invocation | undefined
+    // hook, where it is attached to the event.
+    let shared: InternalInvocation | undefined
     agentB.addHook(AfterInvocationEvent, (event) => {
-      shared = readInvocation(event)
+      shared = toInternal(event.invocation)
     })
 
     const swarm = new Swarm({ nodes: [agentA, agentB], start: 'a' })

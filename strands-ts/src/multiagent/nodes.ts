@@ -1,8 +1,8 @@
 import { Agent } from '../agent/agent.js'
 import { AgentPrinter, type Printer } from '../agent/printer.js'
-import type { InvocationState, InternalInvokeOptions, InvokableAgent, AgentStreamEvent } from '../types/agent.js'
+import type { InvocationState, InvokableAgent, InvokeOptions, AgentStreamEvent } from '../types/agent.js'
 import type { Invocation } from '../agent/invocation.js'
-import type { MultiAgentInput, MultiAgentInternalInvokeOptions } from './multiagent.js'
+import type { MultiAgentInput, MultiAgentInvokeOptions } from './multiagent.js'
 import { dropStaleInterruptedResult } from './multiagent.js'
 import type { MultiAgentStreamEvent } from './events.js'
 import { NodeStreamUpdateEvent, NodeResultEvent } from './events.js'
@@ -56,17 +56,8 @@ export interface NodeInputOptions {
    * don't interleave on stdout.
    */
   bufferOutput?: boolean
-}
 
-/**
- * {@link NodeInputOptions} as passed by the SDK's orchestrators, carrying the
- * enclosing request's shared state. Kept off the public options so a custom
- * node or caller cannot join a foreign request.
- *
- * @internal
- */
-export interface InternalNodeInputOptions extends NodeInputOptions {
-  /** The request's shared state, forwarded to the node's underlying agent or orchestrator. */
+  /** The request this node runs as part of, forwarded to its underlying agent or orchestrator. */
   invocation?: Invocation
 }
 
@@ -276,7 +267,7 @@ export class AgentNode extends Node {
     // Resolve once per handle() call — Node.stream() normally supplies this;
     // handle() is public API, so direct callers get per-call state.
     const invocationState: InvocationState = options?.invocationState ?? {}
-    const invocation = (options as InternalNodeInputOptions | undefined)?.invocation
+    const invocation = options?.invocation
 
     // Only Agent instances support snapshot/restore for state isolation.
     // When `preserveContext` is set, skip the snapshot/restore cycle so the agent
@@ -306,7 +297,7 @@ export class AgentNode extends Node {
     try {
       // Join the request's shared state so this node's usage folds
       // into the whole run's total rather than opening a fresh per-agent one.
-      const invokeOptions: InternalInvokeOptions = {
+      const invokeOptions: InvokeOptions = {
         ...(options?.structuredOutputSchema && { structuredOutputSchema: options.structuredOutputSchema }),
         ...(options?.cancelSignal && { cancelSignal: options.cancelSignal }),
         ...(invocation && { invocation }),
@@ -405,9 +396,9 @@ export class MultiAgentNode extends Node {
     // Resolve once per handle() call — Node.stream() normally supplies this;
     // handle() is public API, so direct callers get per-call state.
     const invocationState: InvocationState = options?.invocationState ?? {}
-    const invocation = (options as InternalNodeInputOptions | undefined)?.invocation
+    const invocation = options?.invocation
 
-    const nestedOptions: MultiAgentInternalInvokeOptions = {
+    const nestedOptions: MultiAgentInvokeOptions = {
       invocationState,
       ...(options?.cancelSignal && { cancelSignal: options.cancelSignal }),
       ...(invocation && { invocation }),

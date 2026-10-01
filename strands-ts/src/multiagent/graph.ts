@@ -1,12 +1,7 @@
 import type { AttributeValue } from '@opentelemetry/api'
 import type { InvocationState, InvokableAgent } from '../types/agent.js'
 import { createInvocation, type Invocation } from '../agent/invocation.js'
-import type {
-  MultiAgentContentInput,
-  MultiAgentInput,
-  MultiAgentInternalInvokeOptions,
-  MultiAgentInvokeOptions,
-} from './multiagent.js'
+import type { MultiAgentContentInput, MultiAgentInput, MultiAgentInvokeOptions } from './multiagent.js'
 import {
   applyOrchestratorHookResponses,
   dropStaleInterruptedResult,
@@ -26,7 +21,7 @@ import type { HookCallback, HookableEventConstructor, HookCleanup } from '../hoo
 import type { MultiAgentPlugin } from './plugins.js'
 import type { SessionManager } from '../session/session-manager.js'
 import { MultiAgentPluginRegistry } from './plugins.js'
-import type { InternalNodeInputOptions, NodeDefinition } from './nodes.js'
+import type { NodeDefinition, NodeInputOptions } from './nodes.js'
 import { AgentNode, MultiAgentNode, Node } from './nodes.js'
 import { MultiAgentState, MultiAgentResult, NodeResult, Status } from './state.js'
 import type { MultiAgent } from './multiagent.js'
@@ -260,7 +255,7 @@ export class Graph implements MultiAgent {
     // One Invocation shared by every node so the whole run rolls into a
     // single usage total. A nested orchestrator inherits the enclosing request's
     // state through the internal channel; a root orchestrator mints its own.
-    const invocation = (options as MultiAgentInternalInvokeOptions | undefined)?.invocation ?? createInvocation()
+    const invocation = options?.invocation ?? createInvocation()
 
     // Hook invocation lives in `_stream` so hook-raised `InterruptError`s land in the
     // same frame as the execution loop.
@@ -551,7 +546,7 @@ export class Graph implements MultiAgent {
     const cancelSignal = signals.length > 0 ? AbortSignal.any(signals) : undefined
 
     try {
-      const nodeOptions: InternalNodeInputOptions = {
+      const nodeOptions: NodeInputOptions = {
         invocationState,
         invocation,
         ...(cancelSignal && { cancelSignal }),

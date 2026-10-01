@@ -3,7 +3,7 @@ import { warnOnce } from '../logging/warn-once.js'
 import type { AttributeValue, Span } from '@opentelemetry/api'
 import type { InvocationState, InvokableAgent } from '../types/agent.js'
 import { createInvocation, type Invocation } from '../agent/invocation.js'
-import type { MultiAgentInput, MultiAgentInternalInvokeOptions, MultiAgentInvokeOptions } from './multiagent.js'
+import type { MultiAgentInput, MultiAgentInvokeOptions } from './multiagent.js'
 import {
   applyOrchestratorHookResponses,
   dropStaleInterruptedResult,
@@ -21,7 +21,7 @@ import { MultiAgentPluginRegistry } from './plugins.js'
 import type { SessionManager } from '../session/session-manager.js'
 import type { ContentBlock } from '../types/messages.js'
 import { TextBlock } from '../types/messages.js'
-import type { AgentNodeOptions, InternalNodeInputOptions } from './nodes.js'
+import type { AgentNodeOptions, NodeInputOptions } from './nodes.js'
 import { AgentNode } from './nodes.js'
 import { MultiAgentState, MultiAgentResult, NodeResult, Status } from './state.js'
 import type { MultiAgent } from './multiagent.js'
@@ -245,7 +245,7 @@ export class Swarm implements MultiAgent {
     // One Invocation shared by every node so the whole run rolls into a
     // single usage total. A nested orchestrator inherits the enclosing request's
     // state through the internal channel; a root orchestrator mints its own.
-    const invocation = (options as MultiAgentInternalInvokeOptions | undefined)?.invocation ?? createInvocation()
+    const invocation = options?.invocation ?? createInvocation()
 
     // Hook invocation lives in `_stream` so hook-raised `InterruptError`s land in the
     // same frame as the execution loop.
@@ -493,7 +493,7 @@ export class Swarm implements MultiAgent {
     const cancelSignal = signals.length > 0 ? AbortSignal.any(signals) : undefined
 
     try {
-      const nodeOptions: InternalNodeInputOptions = {
+      const nodeOptions: NodeInputOptions = {
         structuredOutputSchema: handoffSchema,
         invocationState,
         invocation,

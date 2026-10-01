@@ -1,36 +1,58 @@
 import type { InvokeLimits } from '../types/agent.js'
 import { createEmptyUsage, type Usage } from '../models/streaming.js'
 
+declare const invocationBrand: unique symbol
+
 /**
- * Request-scoped state threaded through one invocation.
+ * Opaque handle to the request an object belongs to.
  *
- * The root {@link Agent.stream} call creates one `Invocation` and shares it by
- * reference across every agent the request reaches — sub-agents invoked as
- * tools and multi-agent nodes see the same instance.
+ * The root `invoke()` / `stream()` call creates one and the SDK attaches it to
+ * the objects it hands to extension code (hook events, tool context, model-call
+ * and strategy contexts). Pass it to {@link InvokeOptions.invocation} to run a
+ * nested agent as part of the same request, sharing its limits and usage total.
  *
- * @internal
+ * Only the SDK can create one; it carries no readable state.
  */
 export interface Invocation {
-  /** Running token usage for the whole request, accumulated in place across every model call. */
-  usage: Usage
-
-  /** Count of agent-loop turns taken so far, across the whole request. */
-  turns: number
-
-  /** Limits inherited from the root request; `undefined` for none. */
-  limits: InvokeLimits | undefined
+  readonly [invocationBrand]: true
 }
 
 /**
- * Creates a fresh {@link Invocation} with a zeroed usage total and no turns
- * taken yet.
+ * Request-scoped state threaded through one invocation, behind the public
+ * {@link Invocation} handle.
+ *
+ * The root {@link Agent.stream} call creates one and shares it by reference
+ * across every agent the request reaches. Sub-agents invoked as tools and
+ * multi-agent nodes see the same instance.
+ *
+ * @internal
+ */
+export class InternalInvocation implements Invocation {
+  declare readonly [invocationBrand]: true
+
+  /** Count of agent-loop turns taken so far, across the whole request. */
+  turns = 0
+
+  /**
+   * @param limits - Limits inherited from the root request; `undefined` for none
+   * @param usage - Running token usage for the whole request, accumulated in place across every model call
+   */
+  constructor(
+    readonly limits: InvokeLimits | undefined,
+    readonly usage: Usage = createEmptyUsage()
+  ) {}
+}
+
+/**
+ * Creates a fresh {@link InternalInvocation} with a zeroed usage total and no
+ * turns taken yet.
  *
  * @param limits - Limits for the request, or `undefined` for none
  * @returns A new request-scoped state object
  * @internal
  */
-export function createInvocation(limits?: InvokeLimits): Invocation {
-  return { usage: createEmptyUsage(), turns: 0, limits }
+export function createInvocation(limits?: InvokeLimits): InternalInvocation {
+  return new InternalInvocation(limits)
 }
 
 /**
@@ -45,39 +67,20 @@ export function createInvocation(limits?: InvokeLimits): Invocation {
  * @internal
  */
 export function createAuxiliaryInvocation(parent: Invocation | undefined): Invocation | undefined {
-  if (!parent) return undefined
-  return { usage: parent.usage, turns: 0, limits: undefined }
+  const internal = toInternal(parent)
+  return internal && new InternalInvocation(undefined, internal.usage)
 }
 
 /**
- * Links each object the SDK passes to extension code (a hook event, tool
- * context, model-call or strategy context, reduce options) to its request's
- * {@link Invocation}. Module-private so the state never appears on a public
- * type or at runtime on the object itself. The link is by object identity: a
- * copy or spread of the object does not have it.
- */
-const invocationsByObject = new WeakMap<object, Invocation>()
-
-/**
- * Links the request's {@link Invocation} to an object the SDK passes to
- * extension code, so SDK code that later receives that object can join the
- * request with {@link readInvocation}.
+ * Unwraps a public {@link Invocation} handle to its request-scoped state.
  *
- * @param target - The object to link the request to
- * @param invocation - The request-scoped state to link; `undefined` links nothing
+ * @param invocation - A handle the SDK attached to an object, if any
+ * @returns The request-scoped state, or `undefined` when there is none
+ * @throws TypeError if the handle was not created by the SDK
  * @internal
  */
-export function linkInvocation(target: object, invocation: Invocation | undefined): void {
-  if (invocation !== undefined) invocationsByObject.set(target, invocation)
-}
-
-/**
- * Returns the {@link Invocation} linked to an object by {@link linkInvocation}.
- *
- * @param source - An object the SDK passed to extension code, if any
- * @returns The linked request-scoped state, or `undefined` when there is none
- * @internal
- */
-export function readInvocation(source: object | undefined): Invocation | undefined {
-  return source === undefined ? undefined : invocationsByObject.get(source)
+export function toInternal(invocation: Invocation | undefined): InternalInvocation | undefined {
+  if (invocation === undefined) return undefined
+  if (!(invocation instanceof InternalInvocation)) throw new TypeError('invocation was not created by the SDK')
+  return invocation
 }

@@ -3,7 +3,6 @@ import { AfterToolCallEvent, BeforeToolCallEvent, ToolStreamUpdateEvent } from '
 import { InterruptError, interruptFromAgent } from '../../interrupt.js'
 import { createMiddlewareInterrupt } from '../../middleware/interrupt.js'
 import { ExecuteToolStage } from '../../middleware/index.js'
-import { linkInvocation } from '../../agent/invocation.js'
 import { deepCopy } from '../../types/json.js'
 import { TextBlock, ToolResultBlock } from '../../types/messages.js'
 
@@ -36,7 +35,7 @@ export interface ToolExecutorOptions {
   readonly meter: Meter
   /** Cancellation signal scoped to this executor invocation. */
   readonly cancelSignal: AbortSignal
-  /** Shared state for the in-flight request, stamped onto each {@link ToolContext} so an SDK-vended tool's auxiliary model calls fold into the request total. */
+  /** The in-flight request, set on each {@link ToolContext} so a tool's nested and auxiliary model calls join it. */
   readonly invocation?: Invocation
   readonly toolInterrupt?: ToolContext['interrupt']
   readonly middlewareInterrupt?: ExecuteToolContext['interrupt']
@@ -124,6 +123,7 @@ export abstract class ToolExecutor {
 
     while (true) {
       const beforeToolCallEvent = new BeforeToolCallEvent({
+        invocation: options.invocation,
         agent: options.agent,
         toolUse,
         tool: registryTool,
@@ -151,6 +151,7 @@ export abstract class ToolExecutor {
           content: [new TextBlock(cancelMessage)],
         })
         const afterToolCallEvent = new AfterToolCallEvent({
+          invocation: options.invocation,
           agent: options.agent,
           toolUse,
           tool: effectiveTool,
@@ -210,6 +211,7 @@ export abstract class ToolExecutor {
       toolUse.toolUseId
     )
     const event = new AfterToolCallEvent({
+      invocation: options.invocation,
       agent: options.agent,
       toolUse,
       tool,
@@ -331,16 +333,20 @@ export abstract class ToolExecutor {
             options.toolInterrupt
               ? options.toolInterrupt<T>(params)
               : interruptFromAgent<T>(options.agent, `tool:${toolUse.toolUseId}:${params.name}`, params, 'tool'),
+          ...(options.invocation && { invocation: options.invocation }),
         }
-
-        linkInvocation(toolContext, options.invocation)
 
         // Iterate manually to wrap raw tool events at the agent boundary and
         // re-enter the tool span for every asynchronous step.
         const toolGenerator = options.tracer.withSpanContext(toolSpan, () => effectiveTool.stream(toolContext))
         let toolNext = await options.tracer.withSpanContext(toolSpan, () => toolGenerator.next())
         while (!toolNext.done) {
-          yield new ToolStreamUpdateEvent({ agent: options.agent, event: toolNext.value, invocationState })
+          yield new ToolStreamUpdateEvent({
+            agent: options.agent,
+            invocation: options.invocation,
+            event: toolNext.value,
+            invocationState,
+          })
           toolNext = await options.tracer.withSpanContext(toolSpan, () => toolGenerator.next())
         }
 

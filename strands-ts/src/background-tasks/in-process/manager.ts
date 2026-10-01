@@ -1,5 +1,5 @@
 import type { Agent } from '../../agent/agent.js'
-import { linkInvocation, type Invocation } from '../../agent/invocation.js'
+import type { Invocation } from '../../agent/invocation.js'
 import type { ToolUseData } from '../../hooks/events.js'
 import { InterruptError, InterruptState } from '../../interrupt.js'
 import { createMiddlewareInterrupt } from '../../middleware/interrupt.js'
@@ -200,8 +200,8 @@ export class InProcessTaskManager implements BackgroundTaskManager {
       toolUse: execution.toolUse,
       interrupt: <T = JSONValue>(params: InterruptParams): T =>
         interruptTool<T>(interruptState, context.taskId, params),
+      ...(execution.invocation && { invocation: execution.invocation }),
     }
-    linkInvocation(toolContext, execution.invocation)
     try {
       return toolTaskOutcome(
         await this._executeTool(
