@@ -34,36 +34,50 @@ export function createInvocation(limits?: InvokeLimits): Invocation {
 }
 
 /**
- * Derives an auxiliary view from the enclosing request's {@link Invocation}: it
- * shares the parent's `usage` by reference but drops the limits and keeps its
- * own turn count, so an auxiliary agent (steering, HITL, goal judge, web-fetch
- * analyst) adds its tokens to the request total without being limited by — or
- * counting turns against — it. Returns `undefined` when there is no enclosing
- * state, so the auxiliary call runs standalone.
+ * Creates the {@link Invocation} for an auxiliary call the SDK makes on a
+ * request's behalf (HITL classifier, steering, goal judge, web-fetch analyst).
+ * The call's tokens count toward the request's usage, but the request's limits
+ * do not apply to it and its turns do not count against them. Returns
+ * `undefined` when there is no enclosing request, so the call runs standalone.
  *
- * @param parent - The enclosing request's state, if any
- * @returns An auxiliary view sharing the parent's usage, or `undefined`
+ * @param parent - The enclosing request's invocation, if any
+ * @returns An invocation sharing the request's usage, or `undefined`
  * @internal
  */
-export function deriveAuxiliaryInvocation(parent: Invocation | undefined): Invocation | undefined {
+export function createAuxiliaryInvocation(parent: Invocation | undefined): Invocation | undefined {
   if (!parent) return undefined
   return { usage: parent.usage, turns: 0, limits: undefined }
 }
 
 /**
- * Stamps the request's {@link Invocation} onto a carrier non-enumerably, so a
- * consumer that receives the carrier (a hook event, {@link ToolContext}, model
- * context) can read the request-scoped state — without the field surfacing in
- * enumeration or serialization of the carrier.
+ * Links each object the SDK passes to extension code (a hook event, tool
+ * context, model-call or strategy context, reduce options) to its request's
+ * {@link Invocation}. Module-private so the state never appears on a public
+ * type or at runtime on the object itself. The link is by object identity: a
+ * copy or spread of the object does not have it.
+ */
+const invocationsByObject = new WeakMap<object, Invocation>()
+
+/**
+ * Links the request's {@link Invocation} to an object the SDK passes to
+ * extension code, so SDK code that later receives that object can join the
+ * request with {@link readInvocation}.
  *
- * @param carrier - The object to attach the state to
- * @param invocation - The request-scoped state to attach
+ * @param target - The object to link the request to
+ * @param invocation - The request-scoped state to link; `undefined` links nothing
  * @internal
  */
-export function attachInvocation(carrier: object, invocation: Invocation): void {
-  Object.defineProperty(carrier, 'invocation', {
-    value: invocation,
-    enumerable: false,
-    configurable: true,
-  })
+export function linkInvocation(target: object, invocation: Invocation | undefined): void {
+  if (invocation !== undefined) invocationsByObject.set(target, invocation)
+}
+
+/**
+ * Returns the {@link Invocation} linked to an object by {@link linkInvocation}.
+ *
+ * @param source - An object the SDK passed to extension code, if any
+ * @returns The linked request-scoped state, or `undefined` when there is none
+ * @internal
+ */
+export function readInvocation(source: object | undefined): Invocation | undefined {
+  return source === undefined ? undefined : invocationsByObject.get(source)
 }

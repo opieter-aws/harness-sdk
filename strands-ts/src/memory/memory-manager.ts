@@ -15,6 +15,8 @@ import type { JSONValue } from '../types/json.js'
 import type { MessageData } from '../types/messages.js'
 import { MessageAddedEvent } from '../hooks/events.js'
 import { ExtractionCoordinator, type ExtractionBinding } from './extraction/coordinator.js'
+import type { InternalExtractionTriggerContext } from './extraction/types.js'
+import { readInvocation } from '../agent/invocation.js'
 import { resolveExtractionConfig } from './extraction/resolve-extraction-config.js'
 import { tool } from '../tools/tool-factory.js'
 import { z } from 'zod'
@@ -248,7 +250,11 @@ export class MemoryManager implements Plugin {
 
     for (const { store, config } of this._extractionStores) {
       for (const trigger of config.triggers) {
-        trigger.attach({ agent, fire: (invocation) => void coordinator.process(store, invocation) })
+        const triggerContext: InternalExtractionTriggerContext = {
+          agent,
+          fire: (firingEvent) => void coordinator.process(store, readInvocation(firingEvent)),
+        }
+        trigger.attach(triggerContext)
       }
     }
   }

@@ -6,7 +6,7 @@
  * than simply discarding it.
  */
 
-import type { Invocation } from '../agent/invocation.js'
+import { readInvocation, type Invocation } from '../agent/invocation.js'
 import type { LocalAgent } from '../types/agent.js'
 import {
   ConversationManager,
@@ -107,9 +107,10 @@ export class SummarizingConversationManager extends ConversationManager {
    * @param options - The reduction options
    * @returns `true` if the history was reduced, `false` otherwise
    */
-  async reduce({ agent, model, error, invocation }: ConversationManagerReduceOptions): Promise<boolean> {
+  async reduce(options: ConversationManagerReduceOptions): Promise<boolean> {
+    const { agent, model, error } = options
     try {
-      return await this._summarizeOldest(agent, this._model ?? model, invocation)
+      return await this._summarizeOldest(agent, this._model ?? model, readInvocation(options))
     } catch (summarizationError) {
       if (error) {
         // Reactive: rethrow so the ContextWindowOverflowError propagates

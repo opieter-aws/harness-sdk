@@ -1,7 +1,6 @@
 import type { JSONValue } from '../../types/json.js'
 import type { MessageData, ContentBlockData } from '../../types/messages.js'
 import type { Model } from '../../models/model.js'
-import type { Invocation } from '../../agent/invocation.js'
 import type { LocalAgent } from '../../types/agent.js'
 import type { Tracer } from '../../telemetry/tracer.js'
 
@@ -62,12 +61,6 @@ export interface ExtractorContext {
    * @internal
    */
   tracer?: Tracer
-  /**
-   * Shared state for the request that triggered this extraction, captured when the trigger
-   * fires so a client-side extractor's model call folds into that request's usage total.
-   * @internal
-   */
-  invocation?: Invocation
 }
 
 /**
@@ -96,13 +89,19 @@ export interface Extractor {
 export interface ExtractionTriggerContext {
   /** The agent the trigger attaches its hooks to. */
   agent: LocalAgent
-  /**
-   * Save this store's unsaved messages now. Runs in the background and returns immediately, so calling
-   * it from a hook never blocks the agent. To await completion, see {@link MemoryManager.flush}. Pass
-   * the firing event's `invocation` so a client-side extractor's model call folds into the enclosing
-   * request's usage total.
-   */
-  fire: (invocation?: Invocation) => void
+  /** Save this store's unsaved messages now. Runs in the background and returns immediately, so calling it from a hook never blocks the agent. To await completion, see {@link MemoryManager.flush}. */
+  fire: () => void
+}
+
+/**
+ * The {@link ExtractionTriggerContext} the SDK builds, whose `fire` also accepts the firing hook
+ * event so a client-side extractor's model call joins that event's request.
+ *
+ * @internal
+ */
+export interface InternalExtractionTriggerContext extends ExtractionTriggerContext {
+  /** Same as {@link ExtractionTriggerContext.fire}, joining the request of `firingEvent` when given. */
+  fire: (firingEvent?: object) => void
 }
 
 /**

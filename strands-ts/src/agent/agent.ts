@@ -37,7 +37,7 @@ import { ModelRouter } from '../models/routing/router.js'
 import type { BaseModelConfig, StreamAggregatedResult, StreamOptions } from '../models/model.js'
 import { ModelPlugin } from '../plugins/model-plugin.js'
 import { totalPromptTokens, isModelStreamEvent } from '../models/streaming.js'
-import { attachInvocation, createInvocation, type Invocation } from './invocation.js'
+import { linkInvocation, createInvocation, readInvocation, type Invocation } from './invocation.js'
 import { ToolRegistry } from '../registry/tool-registry.js'
 import { StateStore } from '../state-store.js'
 import { serializeStateSerializable, loadStateSerializable } from '../types/serializable.js'
@@ -488,10 +488,6 @@ export class Agent implements LocalAgent, InvokableAgent {
   private _mcpClients: McpClient[]
   private _initialized: boolean
   private _isInvoking: boolean = false
-  // Request-scoped state for the in-flight request: created when this call is
-  // the root, inherited when nested. Held for the duration of one stream() and
-  // cleared on exit; the agent lock guarantees a single active invocation.
-  private _activeInvocation: Invocation | undefined
   private _abortController = new AbortController()
   private _abortSignal: AbortSignal = this._abortController.signal
   private _printer?: Printer
@@ -605,8 +601,11 @@ export class Agent implements LocalAgent, InvokableAgent {
     this._backgroundTasks = config?.backgroundTasks
       ? new BackgroundTasks(
           config.backgroundTasks === true ? {} : config.backgroundTasks,
-          (tool, context, middlewareInterrupt) =>
-            this._toolExecutor.executeBackground(
+          (tool, context, middlewareInterrupt) => {
+            // Captured when the task was submitted, so a task that runs after its request
+            // returned never joins a later one.
+            const invocation = readInvocation(context)
+            return this._toolExecutor.executeBackground(
               {
                 agent: this,
                 middlewareRegistry: this._middlewareRegistry,
@@ -617,14 +616,15 @@ export class Agent implements LocalAgent, InvokableAgent {
                 cancelSignal: context.cancelSignal,
                 toolInterrupt: context.interrupt,
                 middlewareInterrupt,
-                ...(this._activeInvocation !== undefined && { invocation: this._activeInvocation }),
+                ...(invocation !== undefined && { invocation }),
                 toolGuard: (selectedTool) => this._backgroundTasks!.assertToolCanRun(selectedTool),
               },
               context.toolUse,
               tool,
               context.invocationState,
-              (event) => this._invokeCallbacks(event)
+              (event) => this._invokeCallbacks(event, invocation)
             )
+          }
         )
       : undefined
 
@@ -1184,7 +1184,7 @@ export class Agent implements LocalAgent, InvokableAgent {
       const invocationState: InvocationState = options?.invocationState ?? {}
       const resolvedOptions: InvokeOptions = options?.invocationState ? options : { ...options, invocationState }
 
-      this._activeInvocation = this._resolveInvocation(options)
+      const invocation = this._resolveInvocation(options)
 
       let currentArgs: InvokeArgs = args
 
@@ -1203,7 +1203,7 @@ export class Agent implements LocalAgent, InvokableAgent {
 
         // Hooks fire outside middleware — always, even on short-circuit.
         const beforeInvocationEvent = new BeforeInvocationEvent({ agent: this, invocationState })
-        yield await this._invokeCallbacks(beforeInvocationEvent)
+        yield await this._invokeCallbacks(beforeInvocationEvent, invocation)
 
         if (beforeInvocationEvent.cancel) {
           const cancelText =
@@ -1218,7 +1218,7 @@ export class Agent implements LocalAgent, InvokableAgent {
             new Error('Continuation was not incorporated into agent history')
           )
           continuationEvent = afterEvent
-          await this._invokeCallbacks(afterEvent)
+          await this._invokeCallbacks(afterEvent, invocation)
           yield afterEvent
           return new AgentResult({
             stopReason: 'endTurn',
@@ -1233,7 +1233,13 @@ export class Agent implements LocalAgent, InvokableAgent {
         let caughtError: Error | undefined
         const afterInvocationEvent = new AfterInvocationEvent({ agent: this, invocationState })
         try {
-          result = yield* this._streamWithMiddleware(currentArgs, resolvedOptions, invocationState, continuationEvent)
+          result = yield* this._streamWithMiddleware(
+            currentArgs,
+            resolvedOptions,
+            invocationState,
+            invocation,
+            continuationEvent
+          )
         } catch (error) {
           caughtError = error as Error
         } finally {
@@ -1245,7 +1251,7 @@ export class Agent implements LocalAgent, InvokableAgent {
             new Error('Continuation was not incorporated into agent history')
           )
           continuationEvent = afterInvocationEvent
-          await this._invokeCallbacks(afterInvocationEvent)
+          await this._invokeCallbacks(afterInvocationEvent, invocation)
         }
 
         // Yield outside finally — in JS, a `yield` inside `finally` suspends the generator
@@ -1283,7 +1289,8 @@ export class Agent implements LocalAgent, InvokableAgent {
             agent: this,
             result: result!,
             invocationState,
-          })
+          }),
+          invocation
         )
         return result!
       }
@@ -1292,8 +1299,6 @@ export class Agent implements LocalAgent, InvokableAgent {
         continuationEvent,
         new Error('Agent stream closed before continuation input was incorporated into agent history')
       )
-      // Clear it so a later invoke on this agent starts fresh, not inheriting a spent one.
-      this._activeInvocation = undefined
       this._isInvoking = false
     }
   }
@@ -1306,6 +1311,7 @@ export class Agent implements LocalAgent, InvokableAgent {
     args: InvokeArgs,
     options: InvokeOptions,
     invocationState: InvocationState,
+    invocation: Invocation,
     continuationEvent?: AfterInvocationEvent
   ): AsyncGenerator<AgentStreamEvent, AgentResult, undefined> {
     // Snapshot so a gate that re-reads its response after next() still resolves even if a tool cycle called deactivate().
@@ -1331,6 +1337,7 @@ export class Agent implements LocalAgent, InvokableAgent {
           const result = yield* self._streamCore(
             streamArgs,
             ctx.options,
+            invocation,
             streamArgs === ctx.args ? undefined : continuationEvent
           )
           return { result }
@@ -1375,10 +1382,11 @@ export class Agent implements LocalAgent, InvokableAgent {
    */
   private async *_streamCore(
     args: InvokeArgs,
-    options?: InvokeOptions,
+    options: InvokeOptions | undefined,
+    invocation: Invocation,
     continuationEvent?: AfterInvocationEvent
   ): AsyncGenerator<AgentStreamEvent, AgentResult, undefined> {
-    const streamGenerator = this._stream(args, options, continuationEvent)
+    const streamGenerator = this._stream(args, options, invocation, continuationEvent)
     let caughtError: Error | undefined
     let iterationResult: IteratorResult<AgentStreamEvent, AgentResult>
     try {
@@ -1386,7 +1394,7 @@ export class Agent implements LocalAgent, InvokableAgent {
 
       while (!iterationResult.done) {
         try {
-          const processed = await this._invokeCallbacks(iterationResult.value)
+          const processed = await this._invokeCallbacks(iterationResult.value, invocation)
           yield processed
           iterationResult = await streamGenerator.next()
         } catch (error) {
@@ -1410,9 +1418,9 @@ export class Agent implements LocalAgent, InvokableAgent {
       while (!drainResult.done) {
         try {
           if (caughtError) {
-            yield await this._invokeCallbacks(drainResult.value)
+            yield await this._invokeCallbacks(drainResult.value, invocation)
           } else {
-            await this._invokeCallbacks(drainResult.value)
+            await this._invokeCallbacks(drainResult.value, invocation)
           }
         } catch (error) {
           logger.warn(
@@ -1528,13 +1536,12 @@ export class Agent implements LocalAgent, InvokableAgent {
    * Invokes hook callbacks and printer for a stream event.
    *
    * @param event - The event to process
+   * @param invocation - The request the event belongs to, linked so a hook running an out-of-loop model call joins it
    * @returns The event after processing
    */
-  private async _invokeCallbacks(event: AgentStreamEvent): Promise<AgentStreamEvent> {
-    // Stamp it so a hook running an out-of-loop model call joins the request.
-    if (this._activeInvocation !== undefined && event.invocation === undefined) {
-      attachInvocation(event, this._activeInvocation)
-    }
+  private async _invokeCallbacks(event: AgentStreamEvent, invocation?: Invocation): Promise<AgentStreamEvent> {
+    // An event a nested agent already linked keeps its own request.
+    if (readInvocation(event) === undefined) linkInvocation(event, invocation)
     if (event instanceof HookableEvent) {
       await this._hooksRegistry.invokeCallbacks(event)
     }
@@ -1552,7 +1559,8 @@ export class Agent implements LocalAgent, InvokableAgent {
    */
   private async *_stream(
     args: InvokeArgs,
-    options?: InvokeOptions,
+    options: InvokeOptions | undefined,
+    invocation: Invocation,
     continuationEvent?: AfterInvocationEvent
   ): AsyncGenerator<AgentStreamEvent, AgentResult, undefined> {
     let currentArgs: InvokeArgs | undefined = args
@@ -1624,7 +1632,7 @@ export class Agent implements LocalAgent, InvokableAgent {
       while (true) {
         this._throwIfCancelled()
 
-        const limitStopReason = this._checkLimits(this._activeInvocation)
+        const limitStopReason = this._checkLimits(invocation)
         if (limitStopReason) {
           result = this._buildLimitStopResult(limitStopReason, invocationState)
           return result
@@ -1632,7 +1640,7 @@ export class Agent implements LocalAgent, InvokableAgent {
 
         // Count this turn before it runs, so the next iteration's limit check
         // sees the pre-turn count (matching the meter's cycle bookkeeping).
-        if (this._activeInvocation) this._activeInvocation.turns += 1
+        invocation.turns += 1
 
         // Start metrics cycle tracking
         const { cycleId, startTime: cycleStartTime } = this._meter.startCycle()
@@ -1685,7 +1693,7 @@ export class Agent implements LocalAgent, InvokableAgent {
             assistantMessage = pendingExecution.assistantMessage
             completedToolResults = pendingExecution.completedToolResults
           } else {
-            const modelResult = yield* this._invokeModel(invocationState, structuredOutputChoice)
+            const modelResult = yield* this._invokeModel(invocationState, invocation, structuredOutputChoice)
 
             if (modelResult.stopReason !== 'toolUse') {
               // Schema set, we already forced, and the model still refused.
@@ -1778,7 +1786,12 @@ export class Agent implements LocalAgent, InvokableAgent {
           }
 
           // Execute tools
-          const toolsResult = yield* this.executeTools(assistantMessage, invocationState, completedToolResults)
+          const toolsResult = yield* this.executeTools(
+            assistantMessage,
+            invocationState,
+            invocation,
+            completedToolResults
+          )
 
           // Reached when the consumer breaks the stream during tool execution.
           // _streamCore's drain loop calls .return(), which runs the finally in
@@ -2116,6 +2129,7 @@ export class Agent implements LocalAgent, InvokableAgent {
    */
   private async *_invokeModel(
     invocationState: InvocationState,
+    invocation: Invocation,
     toolChoice?: ToolChoice
   ): AsyncGenerator<AgentStreamEvent, StreamAggregatedResult, undefined> {
     const toolSpecs = this._toolRegistry.list().map((tool) => tool.toolSpec)
@@ -2201,6 +2215,7 @@ export class Agent implements LocalAgent, InvokableAgent {
       try {
         const result = yield* this._invokeModelWithMiddleware(
           invocationState,
+          invocation,
           selectedModel,
           invokedModelRef,
           toolChoice,
@@ -2295,6 +2310,7 @@ export class Agent implements LocalAgent, InvokableAgent {
    */
   private async *_invokeModelWithMiddleware(
     invocationState: InvocationState,
+    invocation: Invocation,
     selectedModel: Model,
     invokedModelRef: InvokedModelRef,
     toolChoice?: ToolChoice,
@@ -2311,10 +2327,8 @@ export class Agent implements LocalAgent, InvokableAgent {
       ...(projectedInputTokens !== undefined && { projectedInputTokens }),
     }
 
-    // Stamp it so a router strategy's classifier call joins the request.
-    if (this._activeInvocation !== undefined) {
-      attachInvocation(context, this._activeInvocation)
-    }
+    // Link it so a router strategy's classifier call joins the request.
+    linkInvocation(context, invocation)
 
     // Snapshot model state before middleware runs so concurrent mutations don't leak in.
     // The writeback happens after the entire middleware chain completes, so middleware
@@ -2352,7 +2366,13 @@ export class Agent implements LocalAgent, InvokableAgent {
             ...(ctx.dynamicTrailingBlocks ? { dynamicTrailingBlocks: ctx.dynamicTrailingBlocks } : {}),
             ...(self.sessionManager ? { agentMetadata: { sessionId: self.sessionId } } : {}),
           }
-          const gen = self._streamFromModel(ctx.model, ctx.messages as Message[], streamOptions, ctx.invocationState)
+          const gen = self._streamFromModel(
+            ctx.model,
+            ctx.messages as Message[],
+            streamOptions,
+            ctx.invocationState,
+            invocation
+          )
           let iterResult = await gen.next()
           while (!iterResult.done) {
             yield iterResult.value
@@ -2415,14 +2435,15 @@ export class Agent implements LocalAgent, InvokableAgent {
     model: Model,
     messages: Message[],
     streamOptions: StreamOptions,
-    invocationState: InvocationState
+    invocationState: InvocationState,
+    invocation: Invocation
   ): AsyncGenerator<AgentStreamEvent, StreamAggregatedResult, undefined> {
     messages = normalizeToolUseNames(messages)
     // Route every model call through the proxy, the single per-call seam
     // carrying the request state. This terminal is shared by every agent the
     // request reaches, so one wrap here covers sub-agents and nodes alike.
     const proxy = new ModelProxy(model)
-    const streamGenerator = proxy.streamAggregated(messages, streamOptions, this._activeInvocation)
+    const streamGenerator = proxy.streamAggregated(messages, streamOptions, invocation)
     try {
       let result = await streamGenerator.next()
 
@@ -2463,6 +2484,7 @@ export class Agent implements LocalAgent, InvokableAgent {
   private async *executeTools(
     assistantMessage: Message,
     invocationState: InvocationState,
+    invocation: Invocation,
     completedToolResults?: Map<string, ToolResultBlock>
   ): AsyncGenerator<AgentStreamEvent, ToolsExecutionResult, undefined> {
     const beforeToolsEvent = new BeforeToolsEvent({ agent: this, message: assistantMessage, invocationState })
@@ -2516,7 +2538,7 @@ export class Agent implements LocalAgent, InvokableAgent {
             tracer: this._tracer,
             meter: this._meter,
             cancelSignal: this._abortSignal,
-            ...(this._activeInvocation !== undefined && { invocation: this._activeInvocation }),
+            invocation,
             ...(this._backgroundTasks && {
               backgroundTasks: this._backgroundTasks,
               backgroundTaskPassId: assistantMessage.trackingId,

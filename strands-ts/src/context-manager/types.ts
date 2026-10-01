@@ -4,7 +4,6 @@
 
 import type { Storage } from '../storage/storage.js'
 import type { Stash } from './stash.js'
-import type { Invocation } from '../agent/invocation.js'
 import type { LocalAgent } from '../types/agent.js'
 import type { Message } from '../types/messages.js'
 import type { StrategyPresetName } from './presets.js'
@@ -59,13 +58,6 @@ export interface ContextState {
 
   /** L1 stash for persisting offloaded content. Present when storage is configured. */
   stash?: Stash
-
-  /**
-   * Request-scoped state for the enclosing request, threaded so a model-based
-   * strategy's summarization call joins the same request as its parent.
-   * @internal
-   */
-  invocation?: Invocation
 }
 
 /**

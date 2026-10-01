@@ -8,6 +8,7 @@
 
 import type { Agent } from './agent.js'
 import type { InternalInvokeOptions } from '../types/agent.js'
+import { readInvocation } from './invocation.js'
 import type { Snapshot } from '../types/snapshot.js'
 import type { JSONValue } from '../types/json.js'
 import { JsonBlock, LIMIT_STOP_REASONS, TextBlock, ToolResultBlock } from '../types/messages.js'
@@ -176,7 +177,8 @@ export class AgentAsTool extends Tool {
   }
 
   async *stream(toolContext: ToolContext): ToolStreamGenerator {
-    const { toolUse, invocationState, cancelSignal, invocation } = toolContext
+    const { toolUse, invocationState, cancelSignal } = toolContext
+    const invocation = readInvocation(toolContext)
     const toolUseId = toolUse.toolUseId
 
     // Concurrency guard: loadSnapshot + agent.stream() must not overlap.

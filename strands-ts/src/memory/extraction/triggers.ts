@@ -1,6 +1,6 @@
 import { AfterInvocationEvent } from '../../hooks/events.js'
 import { HookOrder } from '../../hooks/types.js'
-import { ExtractionTrigger, type ExtractionTriggerContext } from './types.js'
+import { ExtractionTrigger, type ExtractionTriggerContext, type InternalExtractionTriggerContext } from './types.js'
 
 /**
  * Runs extraction after every agent invocation.
@@ -20,9 +20,8 @@ export class InvocationTrigger extends ExtractionTrigger {
   attach(context: ExtractionTriggerContext): void {
     // Run after the SDK's own after-invocation hooks (e.g. session persistence) so extraction sees
     // the fully settled turn.
-    context.agent.addHook(AfterInvocationEvent, (event) => context.fire(event.invocation), {
-      order: HookOrder.SDK_LAST,
-    })
+    const { fire } = context as InternalExtractionTriggerContext
+    context.agent.addHook(AfterInvocationEvent, (event) => fire(event), { order: HookOrder.SDK_LAST })
   }
 }
 
@@ -60,13 +59,14 @@ export class IntervalTrigger extends ExtractionTrigger {
     // Per-attach counter: each store this trigger is configured on gets its own count via a fresh
     // closure, so two stores sharing one IntervalTrigger instance still fire independently.
     let count = 0
+    const { fire } = context as InternalExtractionTriggerContext
     context.agent.addHook(
       AfterInvocationEvent,
       (event) => {
         count++
         // `fire` is fire-and-forget (returns void); it dispatches extraction in the background.
         if (count % this._turns === 0) {
-          context.fire(event.invocation)
+          fire(event)
         }
       },
       { order: HookOrder.SDK_LAST }

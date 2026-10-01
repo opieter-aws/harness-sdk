@@ -21,7 +21,7 @@ import { MultiAgentPluginRegistry } from './plugins.js'
 import type { SessionManager } from '../session/session-manager.js'
 import type { ContentBlock } from '../types/messages.js'
 import { TextBlock } from '../types/messages.js'
-import type { AgentNodeOptions } from './nodes.js'
+import type { AgentNodeOptions, InternalNodeInputOptions } from './nodes.js'
 import { AgentNode } from './nodes.js'
 import { MultiAgentState, MultiAgentResult, NodeResult, Status } from './state.js'
 import type { MultiAgent } from './multiagent.js'
@@ -493,14 +493,13 @@ export class Swarm implements MultiAgent {
     const cancelSignal = signals.length > 0 ? AbortSignal.any(signals) : undefined
 
     try {
-      const gen = this._tracer.withSpanContext(nodeSpan, () =>
-        node.stream(nodeInput, state, {
-          structuredOutputSchema: handoffSchema,
-          invocationState,
-          invocation,
-          ...(cancelSignal && { cancelSignal }),
-        })
-      )
+      const nodeOptions: InternalNodeInputOptions = {
+        structuredOutputSchema: handoffSchema,
+        invocationState,
+        invocation,
+        ...(cancelSignal && { cancelSignal }),
+      }
+      const gen = this._tracer.withSpanContext(nodeSpan, () => node.stream(nodeInput, state, nodeOptions))
       let next = await this._tracer.withSpanContext(nodeSpan, () => gen.next())
       while (!next.done) {
         if (next.value instanceof HookableEvent) {
