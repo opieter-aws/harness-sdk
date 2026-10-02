@@ -20,7 +20,7 @@ import { MockMessageModel } from '../../__fixtures__/mock-message-model.js'
 import { MockPlugin } from '../../__fixtures__/mock-plugin.js'
 import { collectIterator } from '../../__fixtures__/model-test-helpers.js'
 import { createMockTool } from '../../__fixtures__/tool-helpers.js'
-import { anyInvocation, expectAgentResult } from '../../__fixtures__/agent-helpers.js'
+import { expectAgentResult } from '../../__fixtures__/agent-helpers.js'
 import { Message, TextBlock, ToolResultBlock } from '../../types/messages.js'
 import type { Plugin } from '../../plugins/plugin.js'
 import type { LocalAgent } from '../../types/agent.js'
@@ -45,12 +45,9 @@ describe('Agent Hooks Integration', () => {
       expect(lifecyclePlugin.invocations).toHaveLength(7)
 
       expect(lifecyclePlugin.invocations[0]).toEqual(new InitializedEvent({ agent }))
-      expect(lifecyclePlugin.invocations[1]).toEqual(
-        new BeforeInvocationEvent({ agent, invocation: anyInvocation, invocationState: {} })
-      )
+      expect(lifecyclePlugin.invocations[1]).toEqual(new BeforeInvocationEvent({ agent, invocationState: {} }))
       expect(lifecyclePlugin.invocations[2]).toEqual(
         new MessageAddedEvent({
-          invocation: anyInvocation,
           agent,
           message: new Message({
             role: 'user',
@@ -62,7 +59,6 @@ describe('Agent Hooks Integration', () => {
       )
       expect(lifecyclePlugin.invocations[3]).toEqual(
         new BeforeModelCallEvent({
-          invocation: anyInvocation,
           agent,
           model: agent.model,
           invocationState: {},
@@ -71,7 +67,6 @@ describe('Agent Hooks Integration', () => {
       )
       expect(lifecyclePlugin.invocations[4]).toEqual(
         new AfterModelCallEvent({
-          invocation: anyInvocation,
           agent,
           model: agent.model,
           invocationState: {},
@@ -88,7 +83,6 @@ describe('Agent Hooks Integration', () => {
       )
       expect(lifecyclePlugin.invocations[5]).toEqual(
         new MessageAddedEvent({
-          invocation: anyInvocation,
           agent,
           message: new Message({
             role: 'assistant',
@@ -98,9 +92,7 @@ describe('Agent Hooks Integration', () => {
           invocationState: {},
         })
       )
-      expect(lifecyclePlugin.invocations[6]).toEqual(
-        new AfterInvocationEvent({ agent, invocation: anyInvocation, invocationState: {} })
-      )
+      expect(lifecyclePlugin.invocations[6]).toEqual(new AfterInvocationEvent({ agent, invocationState: {} }))
     })
 
     it('fires hooks during stream', async () => {
@@ -113,12 +105,9 @@ describe('Agent Hooks Integration', () => {
       expect(lifecyclePlugin.invocations).toHaveLength(7)
 
       expect(lifecyclePlugin.invocations[0]).toEqual(new InitializedEvent({ agent }))
-      expect(lifecyclePlugin.invocations[1]).toEqual(
-        new BeforeInvocationEvent({ agent, invocation: anyInvocation, invocationState: {} })
-      )
+      expect(lifecyclePlugin.invocations[1]).toEqual(new BeforeInvocationEvent({ agent, invocationState: {} }))
       expect(lifecyclePlugin.invocations[2]).toEqual(
         new MessageAddedEvent({
-          invocation: anyInvocation,
           agent,
           message: new Message({
             role: 'user',
@@ -130,7 +119,6 @@ describe('Agent Hooks Integration', () => {
       )
       expect(lifecyclePlugin.invocations[3]).toEqual(
         new BeforeModelCallEvent({
-          invocation: anyInvocation,
           agent,
           model: agent.model,
           invocationState: {},
@@ -139,7 +127,6 @@ describe('Agent Hooks Integration', () => {
       )
       expect(lifecyclePlugin.invocations[4]).toEqual(
         new AfterModelCallEvent({
-          invocation: anyInvocation,
           agent,
           model: agent.model,
           invocationState: {},
@@ -156,7 +143,6 @@ describe('Agent Hooks Integration', () => {
       )
       expect(lifecyclePlugin.invocations[5]).toEqual(
         new MessageAddedEvent({
-          invocation: anyInvocation,
           agent,
           message: new Message({
             role: 'assistant',
@@ -166,9 +152,7 @@ describe('Agent Hooks Integration', () => {
           invocationState: {},
         })
       )
-      expect(lifecyclePlugin.invocations[6]).toEqual(
-        new AfterInvocationEvent({ agent, invocation: anyInvocation, invocationState: {} })
-      )
+      expect(lifecyclePlugin.invocations[6]).toEqual(new AfterInvocationEvent({ agent, invocationState: {} }))
     })
   })
 
@@ -189,12 +173,8 @@ describe('Agent Hooks Integration', () => {
       await agent.invoke('Hi')
 
       expect(invocations).toHaveLength(2)
-      expect(invocations[0]).toEqual(
-        new BeforeInvocationEvent({ agent, invocation: anyInvocation, invocationState: {} })
-      )
-      expect(invocations[1]).toEqual(
-        new AfterInvocationEvent({ agent, invocation: anyInvocation, invocationState: {} })
-      )
+      expect(invocations[0]).toEqual(new BeforeInvocationEvent({ agent, invocationState: {} }))
+      expect(invocations[1]).toEqual(new AfterInvocationEvent({ agent, invocationState: {} }))
     })
   })
 
@@ -259,7 +239,6 @@ describe('Agent Hooks Integration', () => {
       const beforeToolCall = beforeToolCallEvents[0] as BeforeToolCallEvent
       expect(beforeToolCall).toEqual(
         new BeforeToolCallEvent({
-          invocation: anyInvocation,
           agent,
           toolUse: { name: 'testTool', toolUseId: 'tool-1', input: {} },
           tool,
@@ -271,7 +250,6 @@ describe('Agent Hooks Integration', () => {
       const afterToolCall = afterToolCallEvents[0] as AfterToolCallEvent
       expect(afterToolCall).toEqual(
         new AfterToolCallEvent({
-          invocation: anyInvocation,
           agent,
           toolUse: { name: 'testTool', toolUseId: 'tool-1', input: {} },
           tool,
@@ -311,7 +289,6 @@ describe('Agent Hooks Integration', () => {
       const afterToolCall = afterToolCallEvents[0] as AfterToolCallEvent
       expect(afterToolCall).toEqual(
         new AfterToolCallEvent({
-          invocation: anyInvocation,
           agent,
           toolUse: { name: 'failingTool', toolUseId: 'tool-1', input: {} },
           tool,
@@ -377,7 +354,6 @@ describe('Agent Hooks Integration', () => {
 
       expect(messageAddedEvents[0]).toEqual(
         new MessageAddedEvent({
-          invocation: anyInvocation,
           agent,
           message: new Message({
             role: 'user',
@@ -389,7 +365,6 @@ describe('Agent Hooks Integration', () => {
       )
       expect(messageAddedEvents[1]).toEqual(
         new MessageAddedEvent({
-          invocation: anyInvocation,
           agent,
           message: new Message({
             role: 'assistant',

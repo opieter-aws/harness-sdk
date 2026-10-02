@@ -96,16 +96,15 @@ export interface HookableEventData {
  * potential future stream-only events that should not be hookable.
  */
 export abstract class HookableEvent extends StreamEvent {
-  /**
-   * The request this event belongs to, or `undefined` outside an agent
-   * invocation. Pass it to {@link InvokeOptions.invocation} to run a nested
-   * agent as part of the same request.
-   */
+  /** The request this event belongs to (`undefined` outside one); pass it to {@link InvokeOptions.invocation} to join it. */
   declare readonly invocation?: Invocation
 
   constructor(data?: HookableEventData) {
     super()
-    if (data?.invocation !== undefined) this.invocation = data.invocation
+    // Non-enumerable, so an existing `toEqual` against an event built without it still matches.
+    if (data?.invocation !== undefined) {
+      Object.defineProperty(this, 'invocation', { value: data.invocation, enumerable: false })
+    }
   }
 
   /**
@@ -199,7 +198,8 @@ export class AfterInvocationEvent extends HookableEvent {
    * When set, after this event's callbacks complete the agent re-enters its loop
    * with these args as new input, under the same invocation lock. A fresh
    * {@link BeforeInvocationEvent}/{@link AfterInvocationEvent} pair fires for the
-   * resumed run. Ignored if the invocation ended with an error.
+   * resumed run. Ignored if the invocation ended with an error or stopped on one
+   * of the request's limits, since a resumed run would stop again at once.
    *
    * If multiple callbacks set `resume`, the last callback to run wins.
    */

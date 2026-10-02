@@ -1,4 +1,5 @@
 import type { InvokeLimits } from '../types/agent.js'
+import type { StopReason } from '../types/messages.js'
 import { createEmptyUsage, type Usage } from '../models/streaming.js'
 
 declare const invocationBrand: unique symbol
@@ -69,6 +70,32 @@ export function createInvocation(limits?: InvokeLimits): InternalInvocation {
 export function createAuxiliaryInvocation(parent: Invocation | undefined): Invocation | undefined {
   const internal = toInternal(parent)
   return internal && new InternalInvocation(undefined, internal.usage)
+}
+
+/**
+ * Returns the stop reason for the first of the request's limits that has been
+ * reached, or `undefined` if none has. Priority when several are reached:
+ * turns, then totalTokens, then outputTokens.
+ *
+ * @param invocation - The request-scoped state to check
+ * @returns The limit stop reason, or `undefined` while within limits
+ * @internal
+ */
+export function reachedLimit(invocation: InternalInvocation): StopReason | undefined {
+  const limits = invocation.limits
+  if (!limits) return undefined
+
+  const { outputTokens, totalTokens } = invocation.usage
+  if (limits.turns !== undefined && invocation.turns >= limits.turns) {
+    return 'limitTurns'
+  }
+  if (limits.totalTokens !== undefined && totalTokens >= limits.totalTokens) {
+    return 'limitTotalTokens'
+  }
+  if (limits.outputTokens !== undefined && outputTokens >= limits.outputTokens) {
+    return 'limitOutputTokens'
+  }
+  return undefined
 }
 
 /**

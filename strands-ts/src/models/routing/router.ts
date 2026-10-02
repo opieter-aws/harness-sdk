@@ -26,7 +26,7 @@ import { InvokeModelStage } from '../../middleware/stages.js'
 import { Model } from '../model.js'
 import { cloneSystemPrompt, type Message, type SystemPrompt } from '../../types/messages.js'
 import { deepCopy, deepCopyWithValidation, type JSONValue } from '../../types/json.js'
-import type { Invocation } from '../../agent/invocation.js'
+import { createAuxiliaryInvocation, type Invocation } from '../../agent/invocation.js'
 import type { InvokeModelContext } from '../../middleware/stages.js'
 import type { Plugin } from '../../plugins/plugin.js'
 import type { ToolSpec } from '../../tools/types.js'
@@ -422,6 +422,7 @@ export class ModelRouter implements Plugin {
     invocation: Invocation | undefined,
     attempts: readonly RoutingAttempt[] = []
   ): RoutingContext {
+    const auxiliaryInvocation = createAuxiliaryInvocation(invocation)
     const context: RoutingContext = {
       messages: messages.map((message) => message.clone()),
       ...(systemPrompt !== undefined && { systemPrompt: cloneSystemPrompt(systemPrompt) }),
@@ -429,7 +430,7 @@ export class ModelRouter implements Plugin {
       candidates: this._candidates,
       invocationState,
       attempts: Object.freeze([...attempts]),
-      ...(invocation && { invocation }),
+      ...(auxiliaryInvocation && { invocation: auxiliaryInvocation }),
     }
     return Object.freeze(context)
   }

@@ -60,7 +60,7 @@ export interface ContextState {
   /** L1 stash for persisting offloaded content. Present when storage is configured. */
   stash?: Stash
 
-  /** The request this reduction belongs to, if any. See {@link InvokeOptions.invocation}. */
+  /** The request this reduction runs for, if any; work forwarded with it counts toward that request's usage but not its limits. */
   readonly invocation?: Invocation
 }
 

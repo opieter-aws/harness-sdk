@@ -13,7 +13,7 @@ import { Interrupt, InterruptError, InterruptState, type InterruptStateData } fr
 import { logger } from '../logging/logger.js'
 import { InterruptResponseContent } from '../types/interrupt.js'
 import { deepCopy, type JSONValue } from '../types/json.js'
-import { JsonBlock, LIMIT_STOP_REASONS, TextBlock, ToolResultBlock } from '../types/messages.js'
+import { JsonBlock, LIMIT_STOP_REASONS, limitStopMessage, TextBlock, ToolResultBlock } from '../types/messages.js'
 import { createErrorResult, Tool, ToolStreamEvent } from '../tools/tool.js'
 import type { ToolContext, ToolStreamGenerator } from '../tools/tool.js'
 import type { ToolSpec } from '../tools/types.js'
@@ -269,10 +269,7 @@ export class AgentAsTool extends Tool {
       // Child stopped on one of the request's shared limits; surface it as an
       // error so the model doesn't treat the truncated answer as complete.
       if (LIMIT_STOP_REASONS.has(result.stopReason)) {
-        return createErrorResult(
-          `Agent '${this.name}' stopped early (${result.stopReason}): the request's limit was reached, so its answer is incomplete`,
-          toolUseId
-        )
+        return createErrorResult(limitStopMessage(this.name, result.stopReason), toolUseId)
       }
 
       // Build the tool result

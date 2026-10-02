@@ -38,10 +38,7 @@ export interface ToolContext extends Interruptible {
   /** Execution-scoped cancellation signal for this tool call. */
   cancelSignal: AbortSignal
 
-  /**
-   * The request this tool call belongs to, if any. Pass it to
-   * {@link InvokeOptions.invocation} to run a sub-agent as part of the same request.
-   */
+  /** The request this tool call belongs to; pass it to {@link InvokeOptions.invocation} to run a sub-agent in the same request. */
   readonly invocation?: Invocation
 }
 
