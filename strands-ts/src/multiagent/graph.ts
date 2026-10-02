@@ -1,6 +1,6 @@
 import type { AttributeValue } from '@opentelemetry/api'
 import type { InvocationState, InvokableAgent } from '../types/agent.js'
-import { createInvocation, type Invocation } from '../agent/invocation.js'
+import { createInvocation, toInternal, type InternalInvocation, type Invocation } from '../agent/invocation.js'
 import type { MultiAgentContentInput, MultiAgentInput, MultiAgentInvokeOptions } from './multiagent.js'
 import {
   applyOrchestratorHookResponses,
@@ -253,9 +253,9 @@ export class Graph implements MultiAgent {
     const invocationState: InvocationState = options?.invocationState ?? {}
 
     // One Invocation shared by every node so the whole run rolls into a
-    // single usage total. A nested orchestrator inherits the enclosing request's
-    // state through the internal channel; a root orchestrator mints its own.
-    const invocation = options?.invocation ?? createInvocation()
+    // single usage total. A caller-passed `invocation` (including a nested
+    // orchestrator's) joins that request; otherwise this run starts its own.
+    const invocation = toInternal(options?.invocation) ?? createInvocation()
 
     // Hook invocation lives in `_stream` so hook-raised `InterruptError`s land in the
     // same frame as the execution loop.
@@ -275,7 +275,7 @@ export class Graph implements MultiAgent {
   private async *_stream(
     input: MultiAgentInput,
     invocationState: InvocationState,
-    invocation: Invocation,
+    invocation: InternalInvocation,
     externalCancelSignal?: AbortSignal
   ): AsyncGenerator<MultiAgentStreamEvent, MultiAgentResult, undefined> {
     // Reuse state from a prior INTERRUPTED run so `graph.invoke(responses)` can
@@ -434,6 +434,7 @@ export class Graph implements MultiAgent {
         results: state.results,
         content: this._resolveContent(state),
         duration: Date.now() - state.startTime,
+        requestUsage: invocation.usage,
       })
       // Stash on interrupt so same-instance resume has state; otherwise start fresh.
       if (result.status === Status.INTERRUPTED) {

@@ -44,6 +44,7 @@ import type { Model } from '../models/model.js'
 import type { Invocation } from '../agent/invocation.js'
 import type { z } from 'zod'
 import { AgentMetrics } from '../telemetry/meter.js'
+import type { Usage } from '../models/streaming.js'
 
 /**
  * Arguments for invoking an agent.
@@ -137,23 +138,21 @@ export interface InvokeOptions {
    */
   cancelSignal?: AbortSignal
 
-  /**
-   * Runs this call as part of an enclosing request, sharing its limits and usage
-   * total. Take it from the {@link Invocation} on a hook event or
-   * {@link ToolContext.invocation}. When set, `limits` must be omitted: a nested
-   * agent inherits the enclosing request's limits.
-   */
+  /** Runs this call as part of the request a hook event or {@link ToolContext.invocation} belongs to, sharing its limits and usage total (even after it returned); add `limits` only if that request has none. */
   invocation?: Invocation
 
   /**
    * Limits bounding the whole request this `invoke()` / `stream()` call sets
-   * off: this agent's loop, sub-agents added via `asTool()`, and any nested
-   * Graph/Swarm all share them. A hand-written tool that invokes another agent
-   * joins only by forwarding {@link ToolContext.invocation} as
-   * {@link InvokeOptions.invocation}; otherwise that sub-agent runs under its own
-   * limits, as if invoked standalone. Auxiliary model calls (summarization, routing,
-   * extraction, steering, HITL, goal judging) add their tokens to the shared
-   * total but are not turn-limited. Counters reset on each reuse of the agent.
+   * off: this agent's loop and sub-agents added via `asTool()` share them, as
+   * does a Graph or Swarm you pass this request's `invocation` to (Graph and
+   * Swarm can't set their own `limits` yet). A hand-written tool that invokes
+   * another agent joins only by forwarding {@link ToolContext.invocation} as
+   * {@link InvokeOptions.invocation}; otherwise that sub-agent runs under its
+   * own limits, as if invoked standalone. A nested call may set its own
+   * `limits` only when the request it joins has none. Auxiliary model calls
+   * (summarization, routing, extraction, steering, HITL, goal judging) add their
+   * tokens to the shared total but are not limited. Counters reset on each
+   * reuse of the agent. {@link AgentResult.requestUsage} reports the shared total.
    *
    * Limits are checked at the top of each loop iteration, so tools requested by
    * the previous turn run to completion first and `agent.messages` stays
@@ -170,31 +169,19 @@ export interface InvokeOptions {
 /**
  * Limits for a single `invoke()` / `stream()` call, bounding the whole request
  * it sets off. Each is optional; omit a field for no limit on that dimension.
- * See {@link InvokeOptions.limits} for how they are scoped.
+ * The token limits count every model call in the request, unlike a provider's
+ * per-call `maxTokens`, and are soft: the agent stops at the next turn
+ * boundary, so the last turn can overshoot, more so when sub-agents run in
+ * parallel. See {@link InvokeOptions.limits} for how they are scoped.
  */
 export interface InvokeLimits {
-  /**
-   * Maximum number of agent loop iterations (turns) across the whole request. A
-   * turn is one model call plus any tool execution that follows.
-   */
+  /** Maximum agent-loop turns (one model call plus the tool calls it requests) across the whole request. */
   turns?: number
 
-  /**
-   * Maximum cumulative model-generated tokens across every model call the
-   * request makes, sub-agents included. Distinct from per-call provider
-   * `maxTokens` settings (e.g. `GoogleModelConfig.params.maxOutputTokens`),
-   * which bound one call's output. Soft: a single oversized response can
-   * overshoot, since the agent only stops at the next turn boundary.
-   */
+  /** Maximum model-generated tokens across every model call in the request. */
   outputTokens?: number
 
-  /**
-   * Maximum cumulative input + output tokens across every model call the
-   * request makes, sub-agents included. Each call's input includes prior turns,
-   * so this compounds across the run — it approximates total token usage. Soft:
-   * a single oversized response can overshoot, since the agent only stops at the
-   * next turn boundary.
-   */
+  /** Maximum input + output tokens across every model call in the request; input grows each turn, so this compounds. */
   totalTokens?: number
 }
 
@@ -474,6 +461,15 @@ export class AgentResult {
   readonly metrics?: AgentMetrics
 
   /**
+   * Token usage for the whole request this call ran in: this agent, sub-agents
+   * that joined it, and auxiliary calls such as summarization or interventions.
+   * The request's limits are checked against this total, unlike {@link metrics},
+   * which covers this agent only. It is the request's running total, so work
+   * that finishes after this call returns (e.g. a background task) still adds to it.
+   */
+  readonly requestUsage?: Usage
+
+  /**
    * Per-invocation state passed into the agent, threaded through hooks and
    * tools, and surfaced here at the end of the invocation. See
    * {@link InvocationState} for details. Always defined — defaults to `{}` when
@@ -502,6 +498,7 @@ export class AgentResult {
     invocationState: InvocationState
     traces?: AgentTrace[]
     metrics?: AgentMetrics
+    requestUsage?: Usage
     structuredOutput?: z.output<z.ZodType>
     interrupts?: Interrupt[]
     checkpoint?: Checkpoint
@@ -514,6 +511,9 @@ export class AgentResult {
     }
     if (data.metrics !== undefined) {
       this.metrics = data.metrics
+    }
+    if (data.requestUsage !== undefined) {
+      this.requestUsage = data.requestUsage
     }
     if (data.structuredOutput !== undefined) {
       this.structuredOutput = data.structuredOutput

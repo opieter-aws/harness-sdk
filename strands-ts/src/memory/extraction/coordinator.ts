@@ -3,7 +3,7 @@ import { context, trace } from '@opentelemetry/api'
 import type { MemoryStore } from '../types.js'
 import type { MessageData, ContentBlockData } from '../../types/messages.js'
 import type { Model } from '../../models/model.js'
-import type { Invocation } from '../../agent/invocation.js'
+import { createAuxiliaryInvocation, type Invocation } from '../../agent/invocation.js'
 import { logger } from '../../logging/logger.js'
 import { normalizeError } from '../../errors.js'
 import type { Tracer } from '../../telemetry/tracer.js'
@@ -289,10 +289,11 @@ export class ExtractionCoordinator {
     const messages = buffered.map((buffer) => buffer.message)
 
     if (extractor) {
+      const auxiliaryInvocation = createAuxiliaryInvocation(invocation)
       const extractorContext: ExtractorContext = {
         defaultModel: this._defaultModel,
         tracer: this._tracer,
-        ...(invocation && { invocation }),
+        ...(auxiliaryInvocation && { invocation: auxiliaryInvocation }),
       }
       const entries = await extractor.extract(messages, extractorContext)
       const settled = await Promise.allSettled(entries.map((entry) => store.add!(entry.content, entry.metadata)))

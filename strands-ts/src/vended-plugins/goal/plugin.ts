@@ -3,7 +3,7 @@
  * Validates the agent's response after each invocation; if it doesn't
  * satisfy the goal, feeds validator feedback back as a user message and re-enters the
  * agent loop via `AfterInvocationEvent.resume`. Loops until validation passes,
- * `maxAttempts` is reached, or `timeout` elapses.
+ * `maxAttempts` is reached, `timeout` elapses, or the request hits one of its `limits`.
  *
  * @example
  * ```ts
@@ -61,7 +61,7 @@
  */
 
 import { Agent } from '../../agent/agent.js'
-import { createAuxiliaryInvocation, type Invocation } from '../../agent/invocation.js'
+import { createAuxiliaryInvocation, reachedLimit, toInternal, type Invocation } from '../../agent/invocation.js'
 import { AfterInvocationEvent, BeforeInvocationEvent, BeforeModelCallEvent } from '../../hooks/events.js'
 import { logger } from '../../logging/logger.js'
 import { warnOnce } from '../../logging/warn-once.js'
@@ -93,8 +93,8 @@ export type Validator = (
   agent: LocalAgent
 ) => boolean | ValidationOutcome | Promise<boolean | ValidationOutcome>
 
-/** Why a goal run ended. */
-export type GoalStopReason = 'satisfied' | 'maxAttempts' | 'timeout'
+/** Why a goal run ended. `'limit'` means the request hit one of its `limits`, so no further attempt could run. */
+export type GoalStopReason = 'satisfied' | 'maxAttempts' | 'timeout' | 'limit'
 
 /** Single attempt summary preserved on `GoalResult`. */
 export interface GoalAttempt {
@@ -373,6 +373,12 @@ export class GoalLoop implements Plugin {
       }
       if (attemptNumber >= this._maxAttempts) {
         finishRun(run, 'maxAttempts')
+        return
+      }
+      // A retry would stop at once on the request's limit, so keep this attempt instead of rolling it back.
+      const invocation = toInternal(event.invocation)
+      if (invocation && reachedLimit(invocation)) {
+        finishRun(run, 'limit')
         return
       }
 

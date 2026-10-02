@@ -58,10 +58,7 @@ export interface MultiAgentInvokeOptions {
    */
   cancelSignal?: AbortSignal
 
-  /**
-   * Runs this orchestration as part of an enclosing request, so every node's
-   * agent shares its limits and usage total. See {@link InvokeOptions.invocation}.
-   */
+  /** Runs this orchestration as part of an enclosing request, shared by every node's agent; see {@link InvokeOptions.invocation}. */
   invocation?: Invocation
 }
 

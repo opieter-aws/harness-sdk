@@ -7,7 +7,7 @@ import {
   toInternal,
   type Invocation,
 } from '../invocation.js'
-import { BeforeModelCallEvent } from '../../hooks/events.js'
+import { AfterInvocationEvent, BeforeInvocationEvent, BeforeModelCallEvent } from '../../hooks/events.js'
 import { tool } from '../../tools/tool-factory.js'
 import type { ToolContext } from '../../tools/tool.js'
 import { MockMessageModel } from '../../__fixtures__/mock-message-model.js'
@@ -94,16 +94,68 @@ describe('Agent request-wide limits', () => {
     expect(result.stopReason).toBe('endTurn')
   })
 
-  it('throws when limits are set on a nested invoke', async () => {
+  it("reports the whole request's usage on the result, while metrics cover this agent only", async () => {
+    const inner = new Agent({
+      model: new MockMessageModel().addTurn(
+        { type: 'textBlock', text: 'inner done' },
+        { usage: { inputTokens: 5, outputTokens: 7, totalTokens: 12 } }
+      ),
+      name: 'inner',
+      description: 'inner agent',
+      printer: false,
+    })
+    const outer = new Agent({
+      model: new MockMessageModel()
+        .addTurn([{ type: 'toolUseBlock', name: 'inner', toolUseId: 'tu-1', input: { input: 'hi' } }], {
+          usage: { inputTokens: 1, outputTokens: 2, totalTokens: 3 },
+        })
+        .addTurn(
+          { type: 'textBlock', text: 'outer done' },
+          { usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 } }
+        ),
+      tools: [inner.asTool()],
+      printer: false,
+    })
+
+    const result = await outer.invoke('go')
+
+    expect({ requestUsage: result.requestUsage, agentUsage: result.metrics?.accumulatedUsage }).toEqual({
+      requestUsage: { inputTokens: 7, outputTokens: 10, totalTokens: 17 },
+      agentUsage: expect.objectContaining({ inputTokens: 2, outputTokens: 3, totalTokens: 5 }),
+    })
+  })
+
+  it('throws when limits are set on a nested invoke whose request already has limits', async () => {
     const agent = new Agent({
       model: new MockMessageModel().addTurn({ type: 'textBlock', text: 'done' }),
       printer: false,
     })
 
-    // An inherited invocation marks this as a nested invoke; limits are root-only.
-    await expect(agent.invoke('hi', { invocation: createInvocation(), limits: { turns: 1 } })).rejects.toThrow(
-      /limits can only be set on the root invoke/
+    await expect(
+      agent.invoke('hi', { invocation: createInvocation({ turns: 3 }), limits: { turns: 1 } })
+    ).rejects.toThrow(
+      new TypeError('limits cannot be set on a nested invoke whose enclosing request already has limits')
     )
+  })
+
+  it('applies a nested invoke its own limits when the request it joins has none', async () => {
+    const loopTool = tool({ name: 'loop', description: 'loops', callback: () => 'again' })
+    const model = new MockMessageModel()
+      .addTurn([{ type: 'toolUseBlock', name: 'loop', toolUseId: 'tu-1', input: {} }], {
+        usage: { inputTokens: 1, outputTokens: 2, totalTokens: 3 },
+      })
+      .addTurn({ type: 'textBlock', text: 'never reached' })
+    const agent = new Agent({ model, tools: [loopTool], printer: false })
+    const enclosing = createInvocation()
+
+    const result = await agent.invoke('go', { invocation: enclosing, limits: { turns: 1 } })
+
+    expect(result.stopReason).toBe('limitTurns')
+    expect(model.callCount).toBe(1)
+    expect({ usage: enclosing.usage, turns: enclosing.turns }).toEqual({
+      usage: { inputTokens: 1, outputTokens: 2, totalTokens: 3 },
+      turns: 0,
+    })
   })
 
   it('folds an auxiliary call into the request total without limiting it', async () => {
@@ -221,5 +273,29 @@ describe('Agent request-wide limits', () => {
     expect(secondInvocation).toBeDefined()
     expect(secondInvocation).not.toBe(firstInvocation)
     expect(toInternal(secondInvocation)?.turns).toBe(1)
+  })
+
+  it('ends on a limit stop even when a hook asks to resume', async () => {
+    const loopTool = tool({ name: 'loop', description: 'loops', callback: () => 'again' })
+    const model = new MockMessageModel().addTurn([{ type: 'toolUseBlock', name: 'loop', toolUseId: 'tu-1', input: {} }])
+    const agent = new Agent({ model, tools: [loopTool], printer: false })
+    let passes = 0
+    let modelCalls = 0
+    agent.addHook(BeforeInvocationEvent, () => {
+      passes += 1
+    })
+    agent.addHook(BeforeModelCallEvent, () => {
+      modelCalls += 1
+    })
+    // Bounded so a regression fails on the pass count instead of looping forever.
+    agent.addHook(AfterInvocationEvent, (event) => {
+      if (passes < 5) event.resume = 'try again'
+    })
+
+    const result = await agent.invoke('go', { limits: { turns: 1 } })
+
+    expect(result.stopReason).toBe('limitTurns')
+    expect(passes).toBe(1)
+    expect(modelCalls).toBe(1)
   })
 })

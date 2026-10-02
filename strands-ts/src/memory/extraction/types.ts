@@ -63,7 +63,7 @@ export interface ExtractorContext {
    */
   tracer?: Tracer
 
-  /** The request this extraction belongs to, if any. See {@link InvokeOptions.invocation}. */
+  /** The request this extraction runs for, if any; work forwarded with it counts toward that request's usage but not its limits. */
   readonly invocation?: Invocation
 }
 

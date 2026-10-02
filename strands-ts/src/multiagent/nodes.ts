@@ -13,6 +13,7 @@ import { logger } from '../logging/logger.js'
 import type { z } from 'zod'
 import { normalizeError } from '../errors.js'
 import { omitUndefined } from '../types/json.js'
+import { LIMIT_STOP_REASONS, limitStopMessage } from '../types/messages.js'
 
 /**
  * Known node type identifiers with extensibility for custom nodes.
@@ -320,6 +321,10 @@ export class AgentNode extends Node {
       }
 
       const agentResult = next.value
+      // Fail the node so the orchestrator doesn't treat a truncated answer as complete.
+      if (LIMIT_STOP_REASONS.has(agentResult.stopReason)) {
+        throw new Error(limitStopMessage(this.id, agentResult.stopReason))
+      }
       const interrupted =
         agentResult.stopReason === 'interrupt' && agentResult.interrupts && agentResult.interrupts.length > 0
 

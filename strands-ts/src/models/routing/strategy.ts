@@ -27,7 +27,7 @@ export interface RoutingContext {
   readonly invocationState: Readonly<InvocationState>
   /** Chronological attempts made during this invocation. */
   readonly attempts: readonly RoutingAttempt[]
-  /** The request this routing decision belongs to, if any. See {@link InvokeOptions.invocation}. */
+  /** The request this routing decision runs for, if any; work forwarded with it counts toward that request's usage but not its limits. */
   readonly invocation?: Invocation
 }
 
