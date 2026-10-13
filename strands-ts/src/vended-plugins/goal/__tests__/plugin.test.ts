@@ -880,17 +880,10 @@ describe('GoalLoop natural-language judge', () => {
       expect(agent.messages.map((message) => message.role)).toEqual(['user', 'assistant'])
     })
 
-    it('adds the judge usage to the request total and runs it past a spent limit', async () => {
+    it('ends on the limit without grading an earlier reply when the pass stops before answering', async () => {
       const [judgeTurn] = buildJudgeTurn(true)
-      const judgeModel = new MockMessageModel().addTurn(judgeTurn, {
-        usage: { inputTokens: 40, outputTokens: 5, totalTokens: 45 },
-      })
-      const plugin = new GoalLoop({
-        name: 'nl-request-limits',
-        goal: 'be concise',
-        judge: { model: judgeModel },
-        maxAttempts: 1,
-      })
+      const judgeModel = new MockMessageModel().addTurn(judgeTurn)
+      const plugin = new GoalLoop({ name: 'nl-spent-on-entry', goal: 'be concise', judge: { model: judgeModel } })
       const agent = new Agent({
         model: new MockMessageModel(),
         messages: [
@@ -900,20 +893,52 @@ describe('GoalLoop natural-language judge', () => {
         plugins: [plugin],
         printer: false,
       })
-      const parentInvocation = createInvocation({ turns: 1 })
-      parentInvocation.turns = 5
+      const spentRequest = createInvocation({ turns: 1 })
+      spentRequest.turns = 1
 
-      // The spent limit stops the host before its model runs, so the judge grades the preloaded reply.
-      const result = await agent.invoke('go', { invocation: parentInvocation })
+      const result = await agent.invoke('go', { invocation: spentRequest })
 
-      expect(result.stopReason).toBe('limitTurns')
+      expect({ stopReason: result.stopReason, text: result.toString() }).toEqual({ stopReason: 'limitTurns', text: '' })
+      expect(plugin.lastResult(agent)).toEqual({ passed: false, stopReason: 'limit', attempts: [] })
+      expect(judgeModel.callCount).toBe(0)
+    })
+
+    it('ends on the limit when it is spent before a fresh agent answers', async () => {
+      const validator = vi.fn(() => true)
+      const goal = new GoalLoop({ goal: validator })
+      const agent = new Agent({ model: new MockMessageModel(), plugins: [goal], printer: false })
+      const spentRequest = createInvocation({ turns: 1 })
+      spentRequest.turns = 1
+
+      await agent.invoke('go', { invocation: spentRequest })
+
+      expect(goal.lastResult(agent)).toEqual({ passed: false, stopReason: 'limit', attempts: [] })
+      expect(validator).not.toHaveBeenCalled()
+    })
+
+    it("adds the judge usage to the request's usage total", async () => {
+      const [judgeTurn] = buildJudgeTurn(true)
+      const judgeModel = new MockMessageModel().addTurn(judgeTurn, {
+        usage: { inputTokens: 40, outputTokens: 5, totalTokens: 45 },
+      })
+      const plugin = new GoalLoop({ name: 'nl-request-usage', goal: 'be concise', judge: { model: judgeModel } })
+      const agent = new Agent({
+        model: new MockMessageModel().addTurn(
+          { type: 'textBlock', text: 'rainbows are refracted light' },
+          { usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 } }
+        ),
+        plugins: [plugin],
+        printer: false,
+      })
+
+      const result = await agent.invoke('explain rainbows', { limits: { turns: 5 } })
+
       expect(plugin.lastResult(agent)).toEqual({
         passed: true,
         stopReason: 'satisfied',
         attempts: [{ attempt: 1, passed: true }],
       })
-      expect(parentInvocation.usage).toEqual({ inputTokens: 40, outputTokens: 5, totalTokens: 45 })
-      expect(parentInvocation.turns).toBe(5)
+      expect(result.requestUsage).toEqual({ inputTokens: 41, outputTokens: 6, totalTokens: 47 })
     })
   })
 })

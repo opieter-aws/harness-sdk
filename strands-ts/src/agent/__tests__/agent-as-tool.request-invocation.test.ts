@@ -57,8 +57,8 @@ describe('AgentAsTool request-wide invocation', () => {
       )
     const outer = new Agent({ model: outerModel, tools: [inner.asTool()] })
 
-    // Neither agent alone reaches 100 output tokens (each emits 60); only the shared
-    // request total does, so tripping proves the limit spans parent and child.
+    // After the first turn the parent and the child have emitted 60 tokens each; only
+    // their shared total reaches 100, so the limit trips before the parent's second turn.
     const result = await outer.invoke('run inner', { limits: { outputTokens: 100 } })
 
     expect(result.stopReason).toBe('limitOutputTokens')

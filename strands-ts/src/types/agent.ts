@@ -145,12 +145,13 @@ export interface InvokeOptions {
    * Limits bounding the whole request this `invoke()` / `stream()` call sets
    * off: this agent's loop and sub-agents added via `asTool()` share them, as
    * does a Graph or Swarm you pass this request's `invocation` to (Graph and
-   * Swarm can't set their own `limits` yet). A hand-written tool that invokes
+   * Swarm have no `limits` option of their own). A hand-written tool that invokes
    * another agent joins only by forwarding {@link ToolContext.invocation} as
    * {@link InvokeOptions.invocation}; otherwise that sub-agent runs under its
    * own limits, as if invoked standalone. A nested call may set its own
-   * `limits` only when the request it joins has none. Auxiliary model calls
-   * (summarization, routing, extraction, steering, HITL, goal judging) add their
+   * `limits` only when the request it joins has none; they count only that
+   * call's turns and tokens. Auxiliary model calls (summarization, routing,
+   * extraction, steering, HITL, goal judging, web-fetch) add their
    * tokens to the shared total but are not limited. Counters reset on each
    * reuse of the agent. {@link AgentResult.requestUsage} reports the shared total.
    *
@@ -470,7 +471,7 @@ export class AgentResult {
    * which covers this agent only. It is the request's running total, so work
    * that finishes after this call returns (e.g. a background task) still adds to it.
    */
-  readonly requestUsage?: Usage
+  readonly requestUsage?: Readonly<Usage>
 
   /**
    * Per-invocation state passed into the agent, threaded through hooks and
@@ -549,10 +550,11 @@ export class AgentResult {
   }
 
   /**
-   * Custom JSON serialization that excludes traces, metrics, and invocationState.
+   * Custom JSON serialization that excludes traces, metrics, requestUsage, and invocationState.
    * Traces and metrics are excluded to avoid sending large payloads over the wire
-   * in API responses; `invocationState` is excluded because its values are
-   * caller-owned and may not be serializable (see {@link InvocationState}).
+   * in API responses; `requestUsage` is the request's live running total;
+   * `invocationState` is excluded because its values are caller-owned and may
+   * not be serializable (see {@link InvocationState}).
    *
    * All three remain accessible via their properties for debugging.
    *

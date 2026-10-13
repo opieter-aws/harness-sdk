@@ -36,7 +36,7 @@ export interface ToolExecutorOptions {
   /** Cancellation signal scoped to this executor invocation. */
   readonly cancelSignal: AbortSignal
   /** The in-flight request, set on each {@link ToolContext} so a tool's nested and auxiliary model calls join it. */
-  readonly invocation?: Invocation
+  readonly invocation?: Invocation | undefined
   readonly toolInterrupt?: ToolContext['interrupt']
   readonly middlewareInterrupt?: ExecuteToolContext['interrupt']
   readonly toolGuard?: (tool: Tool | undefined) => void

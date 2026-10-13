@@ -160,7 +160,7 @@ describe('ConversationManager', () => {
       expect(receivedArgs[0]!.model).toBe(event.model)
     })
 
-    it('passes reduce a handle that shares the request usage without its limits', async () => {
+    it('passes reduce a handle that counts toward the request usage without its limits', async () => {
       const receivedArgs: ConversationManagerReduceOptions[] = []
       class CapturingManager extends ConversationManager {
         readonly name = 'test:capturing'
@@ -187,10 +187,11 @@ describe('ConversationManager', () => {
         })
       )
 
-      const handed = toInternal(receivedArgs[0]!.invocation)
-      expect({ limits: handed?.limits, sharesUsage: handed?.usage === request.usage }).toEqual({
+      const handed = toInternal(receivedArgs[0]!.invocation)!
+      handed.recordUsage({ inputTokens: 1, outputTokens: 2, totalTokens: 3 })
+      expect({ limits: handed.limits, requestUsage: request.usage }).toEqual({
         limits: undefined,
-        sharesUsage: true,
+        requestUsage: { inputTokens: 1, outputTokens: 2, totalTokens: 3 },
       })
     })
   })

@@ -205,7 +205,7 @@ export class MultiAgentResult {
   /** Aggregated token usage across all node results. */
   readonly usage: Usage
   /** Token usage for the whole request this run took part in, including auxiliary calls; see {@link AgentResult.requestUsage}. */
-  readonly requestUsage?: Usage
+  readonly requestUsage?: Readonly<Usage>
   /** Interrupts aggregated across all node results. Present when any node ended INTERRUPTED. */
   readonly interrupts?: Interrupt[]
 
@@ -229,7 +229,7 @@ export class MultiAgentResult {
     if (interrupts.length > 0) this.interrupts = interrupts
   }
 
-  /** Serializes this result to a JSON-compatible value. */
+  /** Serializes this result to a JSON-compatible value, leaving out the live `requestUsage`. */
   toJSON(): JSONValue {
     return {
       type: this.type,

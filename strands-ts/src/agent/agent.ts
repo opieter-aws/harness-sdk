@@ -14,7 +14,6 @@ import {
   contentBlockFromData,
   type ContentBlock,
   type ContentBlockData,
-  LIMIT_STOP_REASONS,
   Message,
   type MessageData,
   type StopReason,
@@ -37,7 +36,7 @@ import { ModelRouter } from '../models/routing/router.js'
 import type { BaseModelConfig, StreamAggregatedResult, StreamOptions } from '../models/model.js'
 import { ModelPlugin } from '../plugins/model-plugin.js'
 import { totalPromptTokens, isModelStreamEvent } from '../models/streaming.js'
-import { createInvocation, InternalInvocation, reachedLimit, toInternal } from './invocation.js'
+import { createInvocation, reachedLimit, toInternal, type InternalInvocation } from './invocation.js'
 import { ToolRegistry } from '../registry/tool-registry.js'
 import { StateStore } from '../state-store.js'
 import { serializeStateSerializable, loadStateSerializable } from '../types/serializable.js'
@@ -641,9 +640,6 @@ export class Agent implements LocalAgent, InvokableAgent {
       ? new BackgroundTasks(
           config.backgroundTasks === true ? {} : config.backgroundTasks,
           (tool, context, middlewareInterrupt) => {
-            // Captured when the task was submitted, so a task that runs after its request
-            // returned never joins a later one.
-            const invocation = context.invocation
             return this._toolExecutor.executeBackground(
               {
                 agent: this,
@@ -655,7 +651,8 @@ export class Agent implements LocalAgent, InvokableAgent {
                 cancelSignal: context.cancelSignal,
                 toolInterrupt: context.interrupt,
                 middlewareInterrupt,
-                ...(invocation !== undefined && { invocation }),
+                // The request that submitted the task, so work that starts after it returned stays with it.
+                invocation: context.invocation,
                 toolGuard: (selectedTool) => this._backgroundTasks!.assertToolCanRun(selectedTool),
               },
               context.toolUse,
@@ -947,22 +944,27 @@ export class Agent implements LocalAgent, InvokableAgent {
 
   /**
    * Builds the {@link AgentResult} for a run that stopped on a limit. A limit
-   * already reached by an enclosing request can trip before this agent appends
-   * its first message, so `lastMessage` falls back to an empty assistant turn.
+   * already reached by an enclosing request can trip before this call appends
+   * anything, so `lastMessage` is then an empty assistant turn rather than a
+   * message left over from an earlier call.
    *
    * @param limitStopReason - The limit that tripped
    * @param invocationState - The shared per-invocation state bag
+   * @param invocation - The request-scoped state the call ran under
+   * @param messageCountAtStart - Length of `messages` when this call started
    * @returns A well-formed result carrying the limit stop reason
    */
   private _buildLimitStopResult(
     limitStopReason: StopReason,
     invocationState: InvocationState,
-    invocation: InternalInvocation
+    invocation: InternalInvocation,
+    messageCountAtStart: number
   ): AgentResult {
+    const appendedMessage = this.messages.length > messageCountAtStart ? this.messages.at(-1) : undefined
     return new AgentResult({
-      requestUsage: invocation.usage,
+      requestUsage: invocation.requestUsage,
       stopReason: limitStopReason,
-      lastMessage: this.messages.at(-1) ?? new Message({ role: 'assistant', content: [] }),
+      lastMessage: appendedMessage ?? new Message({ role: 'assistant', content: [] }),
       traces: this._tracer.localTraces,
       metrics: this._meter.metrics,
       invocationState,
@@ -970,9 +972,23 @@ export class Agent implements LocalAgent, InvokableAgent {
   }
 
   /**
+   * Whether a hook's `resume` starts another pass. Never once the request's limit
+   * is reached: a limit stays reached for the rest of the request, so that pass
+   * could only stop again.
+   *
+   * @param event - The event whose callbacks may have set `resume`
+   * @param invocation - The request-scoped state the pass ran under
+   * @returns `true` to run another pass with `event.resume` as input
+   */
+  private _shouldResume(event: AfterInvocationEvent, invocation: InternalInvocation): boolean {
+    return event.resume !== undefined && reachedLimit(invocation) === undefined
+  }
+
+  /**
    * Inherits the enclosing request's state when nested, else starts a fresh one
    * from this call's limits. A nested call may set its own `limits` only when the
-   * enclosing request has none; its usage still adds to the enclosing total.
+   * enclosing request has none; they count its own turns and tokens, which still
+   * add to the enclosing total.
    *
    * @param options - The per-invocation options, if any
    * @returns The request-scoped state to run this call under
@@ -985,7 +1001,7 @@ export class Agent implements LocalAgent, InvokableAgent {
     if (inherited.limits !== undefined) {
       throw new TypeError('limits cannot be set on a nested invoke whose enclosing request already has limits')
     }
-    return new InternalInvocation(options.limits, inherited.usage)
+    return createInvocation(options.limits, inherited)
   }
 
   /**
@@ -1239,7 +1255,7 @@ export class Agent implements LocalAgent, InvokableAgent {
           await this._invokeCallbacks(afterEvent)
           yield afterEvent
           return new AgentResult({
-            requestUsage: invocation.usage,
+            requestUsage: invocation.requestUsage,
             stopReason: 'endTurn',
             lastMessage: message,
             traces: this._tracer.localTraces,
@@ -1297,9 +1313,7 @@ export class Agent implements LocalAgent, InvokableAgent {
           )) !== undefined
         continuationEvent = hasContinuation ? afterInvocationEvent : undefined
 
-        // A limit stays reached for the rest of the request, so a resumed pass could only stop again.
-        const resumable = afterInvocationEvent.resume !== undefined && !LIMIT_STOP_REASONS.has(stopReason)
-        if (hasContinuation || resumable) {
+        if (hasContinuation || this._shouldResume(afterInvocationEvent, invocation)) {
           currentArgs = afterInvocationEvent.resume ?? []
           continue
         }
@@ -1382,7 +1396,7 @@ export class Agent implements LocalAgent, InvokableAgent {
           yield new InterruptEvent({ agent: this, invocation, interrupt, invocationState })
         }
         return new AgentResult({
-          requestUsage: invocation.usage,
+          requestUsage: invocation.requestUsage,
           stopReason: 'interrupt',
           lastMessage:
             this.messages.length > 0
@@ -1584,6 +1598,7 @@ export class Agent implements LocalAgent, InvokableAgent {
   ): AsyncGenerator<AgentStreamEvent, AgentResult, undefined> {
     let currentArgs: InvokeArgs | undefined = args
     let result: AgentResult | undefined
+    const messageCountAtStart = this.messages.length
 
     this._validateLimits(options)
 
@@ -1653,12 +1668,11 @@ export class Agent implements LocalAgent, InvokableAgent {
 
         const limitStopReason = reachedLimit(invocation)
         if (limitStopReason) {
-          result = this._buildLimitStopResult(limitStopReason, invocationState, invocation)
+          result = this._buildLimitStopResult(limitStopReason, invocationState, invocation, messageCountAtStart)
           return result
         }
 
-        // Count this turn before it runs, so the next iteration's limit check
-        // sees the pre-turn count (matching the meter's cycle bookkeeping).
+        // Count this turn before it runs, so sub-agents started by its tools see it already counted.
         invocation.turns += 1
 
         // Start metrics cycle tracking
@@ -1744,7 +1758,7 @@ export class Agent implements LocalAgent, InvokableAgent {
               // Normal end of turn.
               yield this._appendMessage(modelResult.message, invocationState, invocation)
               result = new AgentResult({
-                requestUsage: invocation.usage,
+                requestUsage: invocation.requestUsage,
                 stopReason: modelResult.stopReason,
                 lastMessage: modelResult.message,
                 traces: this._tracer.localTraces,
@@ -1775,7 +1789,7 @@ export class Agent implements LocalAgent, InvokableAgent {
               closeCycle()
 
               result = new AgentResult({
-                requestUsage: invocation.usage,
+                requestUsage: invocation.requestUsage,
                 stopReason: 'cancelled',
                 lastMessage: modelResult.message,
                 traces: this._tracer.localTraces,
@@ -1797,7 +1811,7 @@ export class Agent implements LocalAgent, InvokableAgent {
               if (priorResumePosition !== 'afterModel') {
                 closeCycle()
                 result = new AgentResult({
-                  requestUsage: invocation.usage,
+                  requestUsage: invocation.requestUsage,
                   stopReason: 'checkpoint',
                   lastMessage: modelResult.message,
                   traces: this._tracer.localTraces,
@@ -1871,7 +1885,7 @@ export class Agent implements LocalAgent, InvokableAgent {
             yield this._appendMessage(lastMessage, invocationState, invocation)
 
             result = new AgentResult({
-              requestUsage: invocation.usage,
+              requestUsage: invocation.requestUsage,
               stopReason: 'endTurn',
               lastMessage,
               traces: this._tracer.localTraces,
@@ -1887,7 +1901,7 @@ export class Agent implements LocalAgent, InvokableAgent {
             : undefined
           if (structuredOutput !== undefined) {
             result = new AgentResult({
-              requestUsage: invocation.usage,
+              requestUsage: invocation.requestUsage,
               stopReason: 'toolUse',
               lastMessage: assistantMessage,
               traces: this._tracer.localTraces,
@@ -1904,7 +1918,7 @@ export class Agent implements LocalAgent, InvokableAgent {
           // iteration's cancellation check return `cancelled`.
           if (this._checkpointing && !this.isCancelled) {
             result = new AgentResult({
-              requestUsage: invocation.usage,
+              requestUsage: invocation.requestUsage,
               stopReason: 'checkpoint',
               lastMessage: assistantMessage,
               traces: this._tracer.localTraces,
@@ -1934,7 +1948,7 @@ export class Agent implements LocalAgent, InvokableAgent {
         }
 
         result = new AgentResult({
-          requestUsage: invocation.usage,
+          requestUsage: invocation.requestUsage,
           stopReason: 'cancelled',
           lastMessage: cancelMessage,
           traces: this._tracer.localTraces,
@@ -2015,12 +2029,13 @@ export class Agent implements LocalAgent, InvokableAgent {
    * Creates an AgentResult for an interrupt stop.
    *
    * @param invocationState - The current invocation state
+   * @param invocation - The request-scoped state the call ran under
    * @returns AgentResult with stopReason 'interrupt'
    */
   private _createInterruptResult(invocationState: InvocationState, invocation: InternalInvocation): AgentResult {
     this._interruptState.activate()
     return new AgentResult({
-      requestUsage: invocation.usage,
+      requestUsage: invocation.requestUsage,
       stopReason: 'interrupt',
       lastMessage:
         this.messages.length > 0

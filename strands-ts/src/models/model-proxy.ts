@@ -1,17 +1,13 @@
 import { toInternal, type Invocation } from '../agent/invocation.js'
 import type { ContentBlock, Message } from '../types/messages.js'
 import type { Model, StreamAggregatedResult, StreamOptions } from './model.js'
-import { accumulateUsage, type ModelStreamEvent } from './streaming.js'
+import type { ModelStreamEvent } from './streaming.js'
 
 /**
- * SDK-internal wrapper that ties one model call to the request's
- * {@link Invocation}. It is the single seam every model call routes through —
- * the agent loop and every auxiliary call (summarization, routing, extraction,
- * steering, HITL, goal judging) alike — so request-scoped work that today lives
- * in the agent loop can move onto this one component without touching call sites
- * or the provider-facing {@link Model} contract.
- *
- * Today it does one such job: fold each call's token usage into the request
+ * SDK-internal wrapper that ties a model call to the request's
+ * {@link Invocation}: the agent loop and the SDK's auxiliary calls
+ * (summarization, routing, extraction, steering, HITL, goal judging, web-fetch)
+ * all route through it, so each call's token usage is added to the request
  * total. The {@link Invocation} is passed per call rather than carried on
  * {@link StreamOptions}, so the provider layer stays free of request-scoped
  * state. Recording is on a clean return only, and only when the provider
@@ -46,17 +42,12 @@ export class ModelProxy {
     return result
   }
 
-  /**
-   * Folds a completed call's reported usage into the invocation's request
-   * total. The single place per-call state is recorded — where limit
-   * enforcement and turn counting join as this grows into the request's
-   * model-call component.
-   */
+  /** Adds a completed call's reported usage to the invocation and every enclosing one. */
   private _record(result: StreamAggregatedResult, invocation?: Invocation): void {
     const usage = result?.metadata?.usage
     const internal = toInternal(invocation)
     if (usage !== undefined && internal !== undefined) {
-      accumulateUsage(internal.usage, usage)
+      internal.recordUsage(usage)
     }
   }
 }

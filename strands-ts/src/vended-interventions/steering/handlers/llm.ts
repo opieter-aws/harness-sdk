@@ -221,7 +221,11 @@ export class LLMSteeringHandler extends SteeringHandler {
   // Constructs a fresh inner agent per call so the handler has no shared
   // mutable state between invocations — this keeps it safe to attach to
   // multiple parent agents (whose tool calls may evaluate concurrently).
-  private async _invoke(prompt: string | ContentBlock[], model: Model, invocation?: Invocation): Promise<SteeringDecision> {
+  private async _invoke(
+    prompt: string | ContentBlock[],
+    model: Model,
+    invocation?: Invocation
+  ): Promise<SteeringDecision> {
     const inner = new Agent({
       model,
       systemPrompt: this._systemPrompt,

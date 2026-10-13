@@ -1,6 +1,6 @@
 import type { InvokeLimits } from '../types/agent.js'
 import type { StopReason } from '../types/messages.js'
-import { createEmptyUsage, type Usage } from '../models/streaming.js'
+import { accumulateUsage, createEmptyUsage, type Usage } from '../models/streaming.js'
 
 declare const invocationBrand: unique symbol
 
@@ -12,56 +12,77 @@ declare const invocationBrand: unique symbol
  * and strategy contexts). Pass it to {@link InvokeOptions.invocation} to run a
  * nested agent as part of the same request, sharing its limits and usage total.
  *
- * Only the SDK can create one; it carries no readable state.
+ * Only the SDK can create one, and its type exposes no state.
  */
 export interface Invocation {
   readonly [invocationBrand]: true
 }
 
 /**
- * Request-scoped state threaded through one invocation, behind the public
- * {@link Invocation} handle.
+ * Request-scoped state behind the public {@link Invocation} handle.
  *
- * The root {@link Agent.stream} call creates one and shares it by reference
- * across every agent the request reaches. Sub-agents invoked as tools and
- * multi-agent nodes see the same instance.
+ * The root {@link Agent.stream} call creates one, and every agent that joins the
+ * request (sub-agents invoked as tools, multi-agent nodes, callers forwarding the
+ * handle) shares it. An auxiliary call or a nested call with its own limits gets
+ * a child instance whose usage also counts toward its parent.
  *
  * @internal
  */
 export class InternalInvocation implements Invocation {
   declare readonly [invocationBrand]: true
 
-  /** Count of agent-loop turns taken so far, across the whole request. */
+  /** Agent-loop turns taken under this invocation. */
   turns = 0
 
+  /** Token usage of every model call made under this invocation, children included. */
+  readonly usage: Usage = createEmptyUsage()
+
   /**
-   * @param limits - Limits inherited from the root request; `undefined` for none
-   * @param usage - Running token usage for the whole request, accumulated in place across every model call
+   * @param limits - Limits checked against this invocation's own turns and usage; `undefined` for none
+   * @param _parent - The enclosing invocation that also counts this one's usage, if any
    */
   constructor(
     readonly limits: InvokeLimits | undefined,
-    readonly usage: Usage = createEmptyUsage()
+    private readonly _parent?: InternalInvocation
   ) {}
+
+  /** Usage of the whole request: the outermost invocation's total. */
+  get requestUsage(): Usage {
+    return this._parent?.requestUsage ?? this.usage
+  }
+
+  /**
+   * Adds one model call's usage to this invocation and every enclosing one.
+   *
+   * @param usage - The usage the model call reported
+   */
+  recordUsage(usage: Usage): void {
+    accumulateUsage(this.usage, usage)
+    this._parent?.recordUsage(usage)
+  }
 }
 
 /**
  * Creates a fresh {@link InternalInvocation} with a zeroed usage total and no
  * turns taken yet.
  *
- * @param limits - Limits for the request, or `undefined` for none
+ * @param limits - Limits for the invocation, or `undefined` for none
+ * @param parent - The enclosing invocation that also counts this one's usage, if any
  * @returns A new request-scoped state object
  * @internal
  */
-export function createInvocation(limits?: InvokeLimits): InternalInvocation {
-  return new InternalInvocation(limits)
+export function createInvocation(limits?: InvokeLimits, parent?: InternalInvocation): InternalInvocation {
+  return new InternalInvocation(limits, parent)
 }
 
 /**
- * Creates the {@link Invocation} for an auxiliary call the SDK makes on a
- * request's behalf (HITL classifier, steering, goal judge, web-fetch analyst).
- * The call's tokens count toward the request's usage, but the request's limits
- * do not apply to it and its turns do not count against them. Returns
- * `undefined` when there is no enclosing request, so the call runs standalone.
+ * Creates the {@link Invocation} for an auxiliary call made on a request's
+ * behalf: the HITL classifier, steering, goal judge and web-fetch analyst, and
+ * the handle given to context strategies, conversation managers, routing
+ * strategies and memory extractors. The call's tokens count toward the
+ * request's usage, but the request's limits do not apply to it and its turns do
+ * not count against them. Returns `undefined` when there is no enclosing
+ * request, so the call runs standalone.
  *
  * @param parent - The enclosing request's invocation, if any
  * @returns An invocation sharing the request's usage, or `undefined`
@@ -69,7 +90,7 @@ export function createInvocation(limits?: InvokeLimits): InternalInvocation {
  */
 export function createAuxiliaryInvocation(parent: Invocation | undefined): Invocation | undefined {
   const internal = toInternal(parent)
-  return internal && new InternalInvocation(undefined, internal.usage)
+  return internal && createInvocation(undefined, internal)
 }
 
 /**

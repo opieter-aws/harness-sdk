@@ -206,6 +206,8 @@ interface RunState {
   attempts: GoalAttempt[]
   result?: GoalResult
   resumed?: boolean
+  /** The latest assistant message when the current pass started, to tell whether the pass produced a new answer. */
+  answerBeforePass: Message | undefined
   /**
    * Set on attempt 1 when `preserveContext` is `false`. Captures the full
    * model-visible session (messages, systemPrompt, modelState, interrupts) and
@@ -304,9 +306,14 @@ export class GoalLoop implements Plugin {
       const existing = this._runs.get(agent)
       if (existing?.resumed) {
         existing.resumed = false
+        existing.answerBeforePass = lastAssistantMessage(agent.messages)
         return
       }
-      this._runs.set(agent, { startTime: Date.now(), attempts: [] })
+      this._runs.set(agent, {
+        startTime: Date.now(),
+        attempts: [],
+        answerBeforePass: lastAssistantMessage(agent.messages),
+      })
     })
 
     // On attempt 1 only, snapshot the model-visible session while
@@ -345,8 +352,14 @@ export class GoalLoop implements Plugin {
         return
       }
 
-      // Cancelled or model-threw before emitting an assistant message.
       const response = lastAssistantMessage(agent.messages)
+      const invocation = toInternal(event.invocation)
+      // The request's limit stopped this pass before it produced a new answer, so there is nothing to grade.
+      if (response === run.answerBeforePass && invocation && reachedLimit(invocation)) {
+        finishRun(run, 'limit')
+        return
+      }
+      // Cancelled or model-threw before emitting an assistant message.
       if (!response) return
 
       const attemptNumber = run.attempts.length + 1
@@ -377,7 +390,6 @@ export class GoalLoop implements Plugin {
         return
       }
       // A retry would stop at once on the request's limit, so keep this attempt instead of rolling it back.
-      const invocation = toInternal(event.invocation)
       if (invocation && reachedLimit(invocation)) {
         finishRun(run, 'limit')
         return

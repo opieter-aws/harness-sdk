@@ -125,6 +125,26 @@ describe('Agent request-wide limits', () => {
     })
   })
 
+  it("counts only a nested invoke's own tokens against its own token limits", async () => {
+    const agent = new Agent({
+      model: new MockMessageModel().addTurn(
+        { type: 'textBlock', text: 'done' },
+        { usage: { inputTokens: 10, outputTokens: 10, totalTokens: 20 } }
+      ),
+      printer: false,
+    })
+    // The enclosing request has already spent far more than the nested call's own limit.
+    const enclosing = createInvocation()
+    enclosing.recordUsage({ inputTokens: 4000, outputTokens: 4000, totalTokens: 8000 })
+
+    const result = await agent.invoke('go', { invocation: enclosing, limits: { totalTokens: 5000 } })
+
+    expect({ stopReason: result.stopReason, requestUsage: result.requestUsage }).toEqual({
+      stopReason: 'endTurn',
+      requestUsage: { inputTokens: 4010, outputTokens: 4010, totalTokens: 8020 },
+    })
+  })
+
   it('throws when limits are set on a nested invoke whose request already has limits', async () => {
     const agent = new Agent({
       model: new MockMessageModel().addTurn({ type: 'textBlock', text: 'done' }),
@@ -160,7 +180,8 @@ describe('Agent request-wide limits', () => {
 
   it('folds an auxiliary call into the request total without limiting it', async () => {
     // An enclosing request whose turn limit is already spent.
-    const parentInvocation = new InternalInvocation({ turns: 1 }, { inputTokens: 1, outputTokens: 2, totalTokens: 3 })
+    const parentInvocation = createInvocation({ turns: 1 })
+    parentInvocation.recordUsage({ inputTokens: 1, outputTokens: 2, totalTokens: 3 })
     parentInvocation.turns = 5
 
     const aux = new Agent({

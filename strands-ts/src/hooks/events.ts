@@ -101,7 +101,7 @@ export abstract class HookableEvent extends StreamEvent {
 
   constructor(data?: HookableEventData) {
     super()
-    // Non-enumerable, so an existing `toEqual` against an event built without it still matches.
+    // Non-enumerable, so it stays out of equality checks, spreads, and enumeration of the event.
     if (data?.invocation !== undefined) {
       Object.defineProperty(this, 'invocation', { value: data.invocation, enumerable: false })
     }

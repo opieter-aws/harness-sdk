@@ -246,7 +246,7 @@ describe('SummarizingConversationManager', () => {
         { usage: { inputTokens: 4, outputTokens: 5, totalTokens: 9 } }
       )
       const manager = new SummarizingConversationManager({ summaryRatio: 0.5, preserveRecentMessages: 2 })
-      const mockAgent = createMockAgent({ messages: makeMessages(20) })
+      const mockAgent = createMockAgent({ messages: makeMessages(20), extra: { auxModel: model as unknown as Model } })
       const invocation = createInvocation({ turns: 1 })
       invocation.turns = 5
 

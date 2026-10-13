@@ -321,9 +321,13 @@ export class AgentNode extends Node {
       }
 
       const agentResult = next.value
-      // Fail the node so the orchestrator doesn't treat a truncated answer as complete.
+      // Fail the node so the orchestrator doesn't treat a truncated answer as complete, keeping its usage.
       if (LIMIT_STOP_REASONS.has(agentResult.stopReason)) {
-        throw new Error(limitStopMessage(this.id, agentResult.stopReason))
+        return omitUndefined({
+          status: Status.FAILED,
+          error: new Error(limitStopMessage(this.id, agentResult.stopReason)),
+          usage: agentResult.metrics?.accumulatedUsage,
+        })
       }
       const interrupted =
         agentResult.stopReason === 'interrupt' && agentResult.interrupts && agentResult.interrupts.length > 0
