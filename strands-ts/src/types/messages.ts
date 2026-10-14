@@ -733,7 +733,7 @@ export type StopReason =
 export const LIMIT_STOP_REASONS = new Set<StopReason>(['limitTurns', 'limitTotalTokens', 'limitOutputTokens'])
 
 /**
- * Explains that a nested agent stopped on one of the request's limits, so its answer is incomplete.
+ * Explains that a nested agent stopped on a limit (its own or the request's), so its answer is incomplete.
  *
  * @param agentName - Name of the agent that stopped
  * @param stopReason - The limit stop reason it returned
@@ -741,7 +741,7 @@ export const LIMIT_STOP_REASONS = new Set<StopReason>(['limitTurns', 'limitTotal
  * @internal
  */
 export function limitStopMessage(agentName: string, stopReason: StopReason): string {
-  return `Agent '${agentName}' stopped early (${stopReason}): the request's limit was reached, so its answer is incomplete`
+  return `Agent '${agentName}' stopped early (${stopReason}): a limit on this call was reached, so its answer is incomplete`
 }
 
 /**

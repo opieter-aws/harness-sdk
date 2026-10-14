@@ -156,8 +156,9 @@ export interface InvokeOptions {
    * goal judging, web-fetch) add their tokens to the shared total but are not
    * limited. The same holds for work done from extension points: an agent that a
    * conversation manager, context or routing strategy, or memory extractor runs
-   * with the `invocation` it receives is counted, not capped. Counters reset on
-   * each reuse of the agent. {@link AgentResult.requestUsage} reports the shared total.
+   * with the `invocation` it receives is counted, not capped; pass `limits`
+   * alongside that `invocation` to cap it. Counters reset on each reuse of the
+   * agent. {@link AgentResult.requestUsage} reports the shared total.
    *
    * Limits are checked at the top of each loop iteration, so tools requested by
    * the previous turn run to completion first and `agent.messages` stays
