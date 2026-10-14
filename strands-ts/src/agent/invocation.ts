@@ -23,8 +23,9 @@ export interface Invocation {
  *
  * The root {@link Agent.stream} call creates one, and every agent that joins the
  * request (sub-agents invoked as tools, multi-agent nodes, callers forwarding the
- * handle) shares it. An auxiliary call or a nested call with its own limits gets
- * a child instance whose usage also counts toward its parent.
+ * handle) shares it. A nested call with its own limits gets a child instance
+ * bounded by both its own limits and its parent's; an auxiliary call gets a child
+ * instance that no limits apply to. Every child's usage also counts toward its parent.
  *
  * @internal
  */
@@ -40,11 +41,18 @@ export class InternalInvocation implements Invocation {
   /**
    * @param limits - Limits checked against this invocation's own turns and usage; `undefined` for none
    * @param _parent - The enclosing invocation that also counts this one's usage, if any
+   * @param _auxiliary - Whether the parent's limits skip this invocation and its turns stay out of the parent's count
    */
   constructor(
     readonly limits: InvokeLimits | undefined,
-    private readonly _parent?: InternalInvocation
+    private readonly _parent?: InternalInvocation,
+    private readonly _auxiliary = false
   ) {}
+
+  /** The enclosing invocation whose limits also bound this one, if any. */
+  get limitingParent(): InternalInvocation | undefined {
+    return this._auxiliary ? undefined : this._parent
+  }
 
   /** Usage of the whole request: the outermost invocation's total. */
   get requestUsage(): Usage {
@@ -60,14 +68,21 @@ export class InternalInvocation implements Invocation {
     accumulateUsage(this.usage, usage)
     this._parent?.recordUsage(usage)
   }
+
+  /** Counts one agent-loop turn here and in every enclosing invocation whose limits bound this one. */
+  recordTurn(): void {
+    this.turns += 1
+    this.limitingParent?.recordTurn()
+  }
 }
 
 /**
  * Creates a fresh {@link InternalInvocation} with a zeroed usage total and no
- * turns taken yet.
+ * turns taken yet. Given a parent, it is a nested invocation: its usage and
+ * turns also count toward the parent, and the parent's limits also bound it.
  *
  * @param limits - Limits for the invocation, or `undefined` for none
- * @param parent - The enclosing invocation that also counts this one's usage, if any
+ * @param parent - The enclosing invocation, if any
  * @returns A new request-scoped state object
  * @internal
  */
@@ -79,10 +94,10 @@ export function createInvocation(limits?: InvokeLimits, parent?: InternalInvocat
  * Creates the {@link Invocation} for an auxiliary call made on a request's
  * behalf: the HITL classifier, steering, goal judge and web-fetch analyst, and
  * the handle given to context strategies, conversation managers, routing
- * strategies and memory extractors. The call's tokens count toward the
- * request's usage, but the request's limits do not apply to it and its turns do
- * not count against them. Returns `undefined` when there is no enclosing
- * request, so the call runs standalone.
+ * strategies and memory extractors. The call's tokens count toward every
+ * enclosing invocation's usage, but no enclosing limits apply to it and its
+ * turns do not count against them. Returns `undefined` when there is no
+ * enclosing request, so the call runs standalone.
  *
  * @param parent - The enclosing request's invocation, if any
  * @returns An invocation sharing the request's usage, or `undefined`
@@ -90,19 +105,25 @@ export function createInvocation(limits?: InvokeLimits, parent?: InternalInvocat
  */
 export function createAuxiliaryInvocation(parent: Invocation | undefined): Invocation | undefined {
   const internal = toInternal(parent)
-  return internal && createInvocation(undefined, internal)
+  return internal && new InternalInvocation(undefined, internal, true)
 }
 
 /**
- * Returns the stop reason for the first of the request's limits that has been
- * reached, or `undefined` if none has. Priority when several are reached:
- * turns, then totalTokens, then outputTokens.
+ * Returns the stop reason for the first limit reached on this invocation or on
+ * any enclosing invocation whose limits bound it, innermost first, or
+ * `undefined` if none has. Priority within one invocation when several are
+ * reached: turns, then totalTokens, then outputTokens.
  *
  * @param invocation - The request-scoped state to check
  * @returns The limit stop reason, or `undefined` while within limits
  * @internal
  */
 export function reachedLimit(invocation: InternalInvocation): StopReason | undefined {
+  const parent = invocation.limitingParent
+  return reachedOwnLimit(invocation) ?? (parent && reachedLimit(parent))
+}
+
+function reachedOwnLimit(invocation: InternalInvocation): StopReason | undefined {
   const limits = invocation.limits
   if (!limits) return undefined
 

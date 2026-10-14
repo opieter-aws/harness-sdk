@@ -138,7 +138,7 @@ export interface InvokeOptions {
    */
   cancelSignal?: AbortSignal
 
-  /** Runs this call as part of the request a hook event or {@link ToolContext.invocation} belongs to, sharing its limits and usage total (even after it returned); add `limits` only if that request has none. */
+  /** Runs this call as part of the request a hook event or {@link ToolContext.invocation} belongs to, sharing its limits and usage total (even after it returned); `limits` set alongside it can only tighten the budget. */
   invocation?: Invocation
 
   /**
@@ -148,12 +148,16 @@ export interface InvokeOptions {
    * Swarm have no `limits` option of their own). A hand-written tool that invokes
    * another agent joins only by forwarding {@link ToolContext.invocation} as
    * {@link InvokeOptions.invocation}; otherwise that sub-agent runs under its
-   * own limits, as if invoked standalone. A nested call may set its own
-   * `limits` only when the request it joins has none; they count only that
-   * call's turns and tokens. Auxiliary model calls (summarization, routing,
-   * extraction, steering, HITL, goal judging, web-fetch) add their
-   * tokens to the shared total but are not limited. Counters reset on each
-   * reuse of the agent. {@link AgentResult.requestUsage} reports the shared total.
+   * own limits, as if invoked standalone. A nested call that joins a request
+   * can also set its own `limits` to tighten the budget for its part: it stops
+   * at whichever limit is reached first, its own or the request's.
+   *
+   * Auxiliary model calls (summarization, routing, extraction, steering, HITL,
+   * goal judging, web-fetch) add their tokens to the shared total but are not
+   * limited. The same holds for work done from extension points: an agent that a
+   * conversation manager, context or routing strategy, or memory extractor runs
+   * with the `invocation` it receives is counted, not capped. Counters reset on
+   * each reuse of the agent. {@link AgentResult.requestUsage} reports the shared total.
    *
    * Limits are checked at the top of each loop iteration, so tools requested by
    * the previous turn run to completion first and `agent.messages` stays
@@ -466,10 +470,12 @@ export class AgentResult {
 
   /**
    * Token usage for the whole request this call ran in: this agent, sub-agents
-   * that joined it, and auxiliary calls such as summarization or interventions.
-   * The request's limits are checked against this total, unlike {@link metrics},
-   * which covers this agent only. It is the request's running total, so work
-   * that finishes after this call returns (e.g. a background task) still adds to it.
+   * that joined it, and auxiliary calls such as summarization or interventions,
+   * unlike {@link metrics}, which covers this agent only. The request's own limits
+   * are checked against this total; a nested call's own limits are checked
+   * against that call's part of it. It is the same live object on every result in
+   * the request, so work that finishes after this call returns (e.g. a background
+   * task) still adds to it.
    */
   readonly requestUsage?: Readonly<Usage>
 

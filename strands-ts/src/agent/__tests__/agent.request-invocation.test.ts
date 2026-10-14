@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { Agent } from '../agent.js'
 import {
   createInvocation,
@@ -11,6 +11,8 @@ import { AfterInvocationEvent, BeforeInvocationEvent, BeforeModelCallEvent } fro
 import { tool } from '../../tools/tool-factory.js'
 import type { ToolContext } from '../../tools/tool.js'
 import { MockMessageModel } from '../../__fixtures__/mock-message-model.js'
+import { Message, TextBlock } from '../../types/messages.js'
+import { anyTrackingId } from '../../__fixtures__/message-helpers.js'
 
 describe('Agent request-wide limits', () => {
   it('leaves the parent limit intact and the child uncounted when a hand-written tool forwards invocationState', async () => {
@@ -66,6 +68,10 @@ describe('Agent request-wide limits', () => {
         { type: 'textBlock', text: 'should not run' },
         { usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 } }
       ),
+      messages: [
+        new Message({ role: 'user', content: [new TextBlock('earlier question')] }),
+        new Message({ role: 'assistant', content: [new TextBlock('earlier answer')] }),
+      ],
       printer: false,
     })
 
@@ -76,8 +82,17 @@ describe('Agent request-wide limits', () => {
     const result = await agent.invoke('go', { invocation: inherited })
 
     expect(result.stopReason).toBe('limitTurns')
-    expect(() => result.toString()).not.toThrow()
+    expect(result.lastMessage).toEqual(new Message({ role: 'assistant', content: [], trackingId: anyTrackingId }))
     expect(result.toString()).toBe('')
+  })
+
+  it('rejects invalid limits before any invocation hook runs', async () => {
+    const agent = new Agent({ model: new MockMessageModel(), printer: false })
+    const beforeInvocation = vi.fn()
+    agent.addHook(BeforeInvocationEvent, beforeInvocation)
+
+    await expect(agent.invoke('go', { limits: { turns: 0 } })).rejects.toThrow(TypeError)
+    expect(beforeInvocation).not.toHaveBeenCalled()
   })
 
   it('does not throw when the invocationState bag is frozen', async () => {
@@ -145,20 +160,25 @@ describe('Agent request-wide limits', () => {
     })
   })
 
-  it('throws when limits are set on a nested invoke whose request already has limits', async () => {
-    const agent = new Agent({
-      model: new MockMessageModel().addTurn({ type: 'textBlock', text: 'done' }),
-      printer: false,
-    })
+  it("stops a nested invoke on the request's limit even when its own limit is looser", async () => {
+    const loopTool = tool({ name: 'loop', description: 'loops', callback: () => 'again' })
+    const model = new MockMessageModel()
+      .addTurn([{ type: 'toolUseBlock', name: 'loop', toolUseId: 'tu-1', input: {} }])
+      .addTurn([{ type: 'toolUseBlock', name: 'loop', toolUseId: 'tu-2', input: {} }])
+    const agent = new Agent({ model, tools: [loopTool], printer: false })
+    const request = createInvocation({ turns: 2 })
+    request.turns = 1
 
-    await expect(
-      agent.invoke('hi', { invocation: createInvocation({ turns: 3 }), limits: { turns: 1 } })
-    ).rejects.toThrow(
-      new TypeError('limits cannot be set on a nested invoke whose enclosing request already has limits')
-    )
+    const result = await agent.invoke('go', { invocation: request, limits: { turns: 5 } })
+
+    expect({ stopReason: result.stopReason, modelCalls: model.callCount, requestTurns: request.turns }).toEqual({
+      stopReason: 'limitTurns',
+      modelCalls: 1,
+      requestTurns: 2,
+    })
   })
 
-  it('applies a nested invoke its own limits when the request it joins has none', async () => {
+  it('stops a nested invoke on its own tighter limit and counts its turns toward the request', async () => {
     const loopTool = tool({ name: 'loop', description: 'loops', callback: () => 'again' })
     const model = new MockMessageModel()
       .addTurn([{ type: 'toolUseBlock', name: 'loop', toolUseId: 'tu-1', input: {} }], {
@@ -166,7 +186,7 @@ describe('Agent request-wide limits', () => {
       })
       .addTurn({ type: 'textBlock', text: 'never reached' })
     const agent = new Agent({ model, tools: [loopTool], printer: false })
-    const enclosing = createInvocation()
+    const enclosing = createInvocation({ turns: 10 })
 
     const result = await agent.invoke('go', { invocation: enclosing, limits: { turns: 1 } })
 
@@ -174,7 +194,7 @@ describe('Agent request-wide limits', () => {
     expect(model.callCount).toBe(1)
     expect({ usage: enclosing.usage, turns: enclosing.turns }).toEqual({
       usage: { inputTokens: 1, outputTokens: 2, totalTokens: 3 },
-      turns: 0,
+      turns: 1,
     })
   })
 

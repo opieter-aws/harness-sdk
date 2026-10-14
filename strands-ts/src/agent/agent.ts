@@ -981,27 +981,25 @@ export class Agent implements LocalAgent, InvokableAgent {
    * @returns `true` to run another pass with `event.resume` as input
    */
   private _shouldResume(event: AfterInvocationEvent, invocation: InternalInvocation): boolean {
-    return event.resume !== undefined && reachedLimit(invocation) === undefined
+    if (event.resume === undefined) return false
+    const limitStopReason = reachedLimit(invocation)
+    if (limitStopReason === undefined) return true
+    logger.debug(`limit=<${limitStopReason}> | ignoring resume because the request reached its limit`)
+    return false
   }
 
   /**
-   * Inherits the enclosing request's state when nested, else starts a fresh one
-   * from this call's limits. A nested call may set its own `limits` only when the
-   * enclosing request has none; they count its own turns and tokens, which still
-   * add to the enclosing total.
+   * Joins the enclosing request when nested, else starts a fresh one from this
+   * call's limits. A nested call that sets its own `limits` runs under a child
+   * invocation, bounded by both its own limits and the request's.
    *
    * @param options - The per-invocation options, if any
    * @returns The request-scoped state to run this call under
-   * @throws TypeError if `limits` is set on a nested invoke whose enclosing request already has limits
    */
   private _resolveInvocation(options: InvokeOptions | undefined): InternalInvocation {
     const inherited = toInternal(options?.invocation)
     if (!inherited) return createInvocation(options?.limits)
-    if (options?.limits === undefined) return inherited
-    if (inherited.limits !== undefined) {
-      throw new TypeError('limits cannot be set on a nested invoke whose enclosing request already has limits')
-    }
-    return createInvocation(options.limits, inherited)
+    return options?.limits === undefined ? inherited : createInvocation(options.limits, inherited)
   }
 
   /**
@@ -1218,6 +1216,7 @@ export class Agent implements LocalAgent, InvokableAgent {
       const invocationState: InvocationState = options?.invocationState ?? {}
       const resolvedOptions: InvokeOptions = options?.invocationState ? options : { ...options, invocationState }
 
+      this._validateLimits(options)
       const invocation = this._resolveInvocation(options)
 
       let currentArgs: InvokeArgs = args
@@ -1600,8 +1599,6 @@ export class Agent implements LocalAgent, InvokableAgent {
     let result: AgentResult | undefined
     const messageCountAtStart = this.messages.length
 
-    this._validateLimits(options)
-
     // Checkpoint resume: consume a { checkpointResume: { checkpoint } } arg.
     // On resume we append no new input and re-derive the cycle position from the
     // checkpoint. `cycleIndex` and `resumePosition` are loop-local, so a stale
@@ -1673,7 +1670,7 @@ export class Agent implements LocalAgent, InvokableAgent {
         }
 
         // Count this turn before it runs, so sub-agents started by its tools see it already counted.
-        invocation.turns += 1
+        invocation.recordTurn()
 
         // Start metrics cycle tracking
         const { cycleId, startTime: cycleStartTime } = this._meter.startCycle()

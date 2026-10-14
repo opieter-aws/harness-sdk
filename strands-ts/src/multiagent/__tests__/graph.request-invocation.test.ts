@@ -47,6 +47,25 @@ describe('Graph request-wide invocation', () => {
     expect(result.requestUsage).toBe(shared?.usage)
   })
 
+  it("reports the whole request's usage when it runs inside a nested call's own limits", async () => {
+    const analyst = new Agent({
+      model: new MockMessageModel().addTurn(
+        { type: 'textBlock', text: 'done' },
+        { usage: { inputTokens: 2, outputTokens: 3, totalTokens: 5 } }
+      ),
+      printer: false,
+      id: 'analyst',
+    })
+    const graph = new Graph({ nodes: [analyst], edges: [] })
+    const request = createInvocation()
+    request.recordUsage({ inputTokens: 100, outputTokens: 100, totalTokens: 200 })
+
+    const result = await graph.invoke('analyze', { invocation: createInvocation({ turns: 5 }, request) })
+
+    expect(result.requestUsage).toBe(request.usage)
+    expect(request.usage).toEqual({ inputTokens: 102, outputTokens: 103, totalTokens: 205 })
+  })
+
   it('fails a node whose agent stops on the forwarded request limit', async () => {
     const analyst = new Agent({
       model: new MockMessageModel().addTurn({ type: 'textBlock', text: 'never reached' }),
