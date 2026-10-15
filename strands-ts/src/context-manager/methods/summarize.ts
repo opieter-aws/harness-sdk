@@ -8,7 +8,7 @@
 
 import type { Model } from '../../models/model.js'
 import { ModelProxy } from '../../models/model-proxy.js'
-import type { Invocation } from '../../agent/invocation.js'
+import type { AgentContext } from '../../agent/agent-context.js'
 import { JsonBlock, Message, TextBlock, ToolResultBlock } from '../../types/messages.js'
 import type { ContentBlock, ToolResultContent } from '../../types/messages.js'
 import { logger } from '../../logging/logger.js'
@@ -62,15 +62,15 @@ export async function summarizeContent(
   content: ContentBlock[],
   model: Model,
   config?: SummarizeConfig,
-  invocation?: Invocation
+  agentContext?: AgentContext
 ): Promise<string | null> {
-  const result = await callSummarizer(content, model, config, invocation)
+  const result = await callSummarizer(content, model, config, agentContext)
   if (result !== undefined) return result
 
   const textOnly = content.filter((block) => block instanceof TextBlock)
   if (textOnly.length === 0 || textOnly.length === content.length) return null
 
-  const textResult = await callSummarizer(textOnly, model, config, invocation)
+  const textResult = await callSummarizer(textOnly, model, config, agentContext)
   return textResult ?? null
 }
 
@@ -110,7 +110,7 @@ async function callSummarizer(
   content: ContentBlock[],
   model: Model,
   config?: SummarizeConfig,
-  invocation?: Invocation
+  agentContext?: AgentContext
 ): Promise<string | null | undefined> {
   const messages = [
     new Message({
@@ -123,7 +123,7 @@ async function callSummarizer(
     const stream = new ModelProxy(model).streamAggregated(
       messages,
       { systemPrompt: config?.systemPrompt ?? DEFAULT_SYSTEM_PROMPT },
-      invocation
+      agentContext
     )
 
     let result: Awaited<ReturnType<typeof stream.next>> | undefined

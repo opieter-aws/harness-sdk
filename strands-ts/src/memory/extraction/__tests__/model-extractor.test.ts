@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { ModelExtractor } from '../model-extractor.js'
 import { MockMessageModel } from '../../../__fixtures__/mock-message-model.js'
-import { createInvocation } from '../../../agent/invocation.js'
+import { createAgentContext } from '../../../agent/agent-context.js'
 import { Tracer } from '../../../telemetry/tracer.js'
 import type { Model } from '../../../models/model.js'
 import type { MessageData } from '../../../types/messages.js'
@@ -145,14 +145,14 @@ describe('ModelExtractor', () => {
         { usage: { inputTokens: 4, outputTokens: 5, totalTokens: 9 } }
       )
       const extractor = new ModelExtractor({ model: model as unknown as Model })
-      const invocation = createInvocation({ turns: 1 })
-      invocation.turns = 5
+      const agentContext = createAgentContext({ turns: 1 })
+      agentContext.turns = 5
 
-      const entries = await extractor.extract([userTurn('x')], { invocation })
+      const entries = await extractor.extract([userTurn('x')], { agentContext })
 
       expect(entries).toEqual([{ content: 'fact' }])
-      expect(invocation.usage).toEqual({ inputTokens: 4, outputTokens: 5, totalTokens: 9 })
-      expect(invocation.turns).toBe(5)
+      expect(agentContext.usage).toEqual({ inputTokens: 4, outputTokens: 5, totalTokens: 9 })
+      expect(agentContext.turns).toBe(5)
     })
   })
 })

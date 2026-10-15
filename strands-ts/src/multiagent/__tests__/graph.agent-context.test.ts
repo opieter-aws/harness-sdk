@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import { Agent } from '../../agent/agent.js'
-import { createInvocation, toInternal, type InternalInvocation } from '../../agent/invocation.js'
+import { createAgentContext, unwrapAgentContext, type AgentContextImplementation } from '../../agent/agent-context.js'
 import { limitStopMessage } from '../../types/messages.js'
 import { AfterInvocationEvent } from '../../hooks/events.js'
 import { MockMessageModel } from '../../__fixtures__/mock-message-model.js'
 import { Graph } from '../graph.js'
 import { Status } from '../state.js'
 
-describe('Graph request-wide invocation', () => {
+describe('Graph request-wide agent context', () => {
   it('folds every node model usage and turn into one shared request total', async () => {
     const agentA = new Agent({
       model: new MockMessageModel().addTurn(
@@ -26,11 +26,9 @@ describe('Graph request-wide invocation', () => {
       id: 'b',
     })
 
-    // Capture the shared Invocation from the last node's after-invocation hook,
-    // where it is attached to the event.
-    let shared: InternalInvocation | undefined
+    let shared: AgentContextImplementation | undefined
     agentB.addHook(AfterInvocationEvent, (event) => {
-      shared = toInternal(event.invocation)
+      shared = unwrapAgentContext(event.agentContext)
     })
 
     const graph = new Graph({
@@ -40,8 +38,6 @@ describe('Graph request-wide invocation', () => {
 
     const result = await graph.invoke('hello')
 
-    // Both nodes accumulate into the single shared Invocation, so usage is the
-    // exact sum of both nodes' model usage and turns count both.
     expect(shared?.usage).toEqual({ inputTokens: 30, outputTokens: 60, totalTokens: 90 })
     expect(shared?.turns).toBe(2)
     expect(result.requestUsage).toBe(shared?.usage)
@@ -57,10 +53,10 @@ describe('Graph request-wide invocation', () => {
       id: 'analyst',
     })
     const graph = new Graph({ nodes: [analyst], edges: [] })
-    const request = createInvocation()
+    const request = createAgentContext()
     request.recordUsage({ inputTokens: 100, outputTokens: 100, totalTokens: 200 })
 
-    const result = await graph.invoke('analyze', { invocation: createInvocation({ turns: 5 }, request) })
+    const result = await graph.invoke('analyze', { agentContext: createAgentContext({ turns: 5 }, request) })
 
     expect(result.requestUsage).toBe(request.usage)
     expect(request.usage).toEqual({ inputTokens: 102, outputTokens: 103, totalTokens: 205 })
@@ -73,10 +69,10 @@ describe('Graph request-wide invocation', () => {
       id: 'analyst',
     })
     const graph = new Graph({ nodes: [analyst], edges: [] })
-    const spentRequest = createInvocation({ turns: 1 })
+    const spentRequest = createAgentContext({ turns: 1 })
     spentRequest.turns = 1
 
-    const result = await graph.invoke('analyze', { invocation: spentRequest })
+    const result = await graph.invoke('analyze', { agentContext: spentRequest })
 
     expect(result.results).toEqual([
       expect.objectContaining({

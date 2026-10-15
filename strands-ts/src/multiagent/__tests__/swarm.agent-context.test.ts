@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { Agent } from '../../agent/agent.js'
-import { toInternal, type InternalInvocation } from '../../agent/invocation.js'
+import { unwrapAgentContext, type AgentContextImplementation } from '../../agent/agent-context.js'
 import { AfterInvocationEvent } from '../../hooks/events.js'
 import { MockMessageModel } from '../../__fixtures__/mock-message-model.js'
 import type { JSONValue } from '../../types/json.js'
@@ -27,24 +27,20 @@ function makeHandoffAgent(id: string, nextAgentId: string | undefined, usage: Us
   return new Agent({ model, printer: false, id, description: `Agent ${id}` })
 }
 
-describe('Swarm request-wide invocation', () => {
+describe('Swarm request-wide agent context', () => {
   it('folds every node model usage into one shared request total', async () => {
     const agentA = makeHandoffAgent('a', 'b', { inputTokens: 10, outputTokens: 25, totalTokens: 35 })
     const agentB = makeHandoffAgent('b', undefined, { inputTokens: 20, outputTokens: 35, totalTokens: 55 })
 
-    // Capture the shared Invocation from the terminal node's after-invocation
-    // hook, where it is attached to the event.
-    let shared: InternalInvocation | undefined
+    let shared: AgentContextImplementation | undefined
     agentB.addHook(AfterInvocationEvent, (event) => {
-      shared = toInternal(event.invocation)
+      shared = unwrapAgentContext(event.agentContext)
     })
 
     const swarm = new Swarm({ nodes: [agentA, agentB], start: 'a' })
 
     await swarm.invoke('hello')
 
-    // Node A hands off to node B; both accumulate into the single shared
-    // Invocation, so the total is the exact sum across the handoff.
     expect(shared?.usage).toEqual({ inputTokens: 30, outputTokens: 60, totalTokens: 90 })
   })
 })

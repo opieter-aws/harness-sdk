@@ -2,7 +2,12 @@ import { logger } from '../logging/logger.js'
 import { warnOnce } from '../logging/warn-once.js'
 import type { AttributeValue, Span } from '@opentelemetry/api'
 import type { InvocationState, InvokableAgent } from '../types/agent.js'
-import { createInvocation, toInternal, type InternalInvocation, type Invocation } from '../agent/invocation.js'
+import {
+  createAgentContext,
+  unwrapAgentContext,
+  type AgentContextImplementation,
+  type AgentContext,
+} from '../agent/agent-context.js'
 import type { MultiAgentInput, MultiAgentInvokeOptions } from './multiagent.js'
 import {
   applyOrchestratorHookResponses,
@@ -242,14 +247,11 @@ export class Swarm implements MultiAgent {
     // are visible to the next.
     const invocationState: InvocationState = options?.invocationState ?? {}
 
-    // One Invocation shared by every node so the whole run rolls into a
-    // single usage total. A caller-passed `invocation` (including a nested
-    // orchestrator's) joins that request; otherwise this run starts its own.
-    const invocation = toInternal(options?.invocation) ?? createInvocation()
+    const agentContext = unwrapAgentContext(options?.agentContext) ?? createAgentContext()
 
     // Hook invocation lives in `_stream` so hook-raised `InterruptError`s land in the
     // same frame as the execution loop.
-    const gen = this._stream(input, invocationState, invocation, options?.cancelSignal)
+    const gen = this._stream(input, invocationState, agentContext, options?.cancelSignal)
     let next = await gen.next()
     while (!next.done) {
       yield next.value
@@ -261,7 +263,7 @@ export class Swarm implements MultiAgent {
   private async *_stream(
     input: MultiAgentInput,
     invocationState: InvocationState,
-    invocation: InternalInvocation,
+    agentContext: AgentContextImplementation,
     externalCancelSignal?: AbortSignal
   ): AsyncGenerator<MultiAgentStreamEvent, MultiAgentResult, undefined> {
     // Reuse state from a prior INTERRUPTED run so `swarm.invoke(responses)` can
@@ -371,7 +373,7 @@ export class Swarm implements MultiAgent {
           handoff,
           multiAgentSpan,
           invocationState,
-          invocation,
+          agentContext,
           nodeCancelSignal
         )
         nextInput = input
@@ -405,7 +407,7 @@ export class Swarm implements MultiAgent {
         results: state.results,
         content: this._resolveContent(state),
         duration: Date.now() - state.startTime,
-        requestUsage: invocation.requestUsage,
+        requestUsage: agentContext.requestUsage,
       })
       // Stash on interrupt so same-instance resume has state; otherwise start fresh.
       if (result.status === Status.INTERRUPTED) {
@@ -445,7 +447,7 @@ export class Swarm implements MultiAgent {
     handoff: HandoffResult | undefined,
     multiAgentSpan: Span | null,
     invocationState: InvocationState,
-    invocation: Invocation,
+    agentContext: AgentContext,
     executionSignal?: AbortSignal
   ): AsyncGenerator<MultiAgentStreamEvent, NodeResult, undefined> {
     const nodeState = state.node(node.id)!
@@ -497,7 +499,7 @@ export class Swarm implements MultiAgent {
       const nodeOptions: NodeInputOptions = {
         structuredOutputSchema: handoffSchema,
         invocationState,
-        invocation,
+        agentContext,
         ...(cancelSignal && { cancelSignal }),
       }
       const gen = this._tracer.withSpanContext(nodeSpan, () => node.stream(nodeInput, state, nodeOptions))

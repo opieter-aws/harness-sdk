@@ -99,7 +99,12 @@ export class ConcurrentToolExecutor extends ToolExecutor {
             error,
           })
           resultsByToolUseId.set(toolUseBlock.toolUseId, result)
-          yield new ToolResultEvent({ agent: options.agent, invocation: options.invocation, result, invocationState })
+          yield new ToolResultEvent({
+            agent: options.agent,
+            agentContext: options.agentContext,
+            result,
+            invocationState,
+          })
           continue
         }
 
@@ -108,7 +113,7 @@ export class ConcurrentToolExecutor extends ToolExecutor {
           resultsByToolUseId.set(toolUseBlock.toolUseId, winner.result.value)
           yield new ToolResultEvent({
             agent: options.agent,
-            invocation: options.invocation,
+            agentContext: options.agentContext,
             result: winner.result.value,
             invocationState,
           })

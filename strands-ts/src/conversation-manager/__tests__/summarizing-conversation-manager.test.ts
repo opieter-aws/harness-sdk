@@ -4,7 +4,7 @@ import { ContextWindowOverflowError, Message, TextBlock, ToolUseBlock, ToolResul
 import { AfterModelCallEvent, BeforeModelCallEvent } from '../../hooks/events.js'
 import { createMockAgent, invokeTrackedHook } from '../../__fixtures__/agent-helpers.js'
 import { MockMessageModel } from '../../__fixtures__/mock-message-model.js'
-import { createInvocation } from '../../agent/invocation.js'
+import { createAgentContext } from '../../agent/agent-context.js'
 import { Model as ModelBase } from '../../models/model.js'
 import type { Model, BaseModelConfig } from '../../models/model.js'
 
@@ -247,20 +247,20 @@ describe('SummarizingConversationManager', () => {
       )
       const manager = new SummarizingConversationManager({ summaryRatio: 0.5, preserveRecentMessages: 2 })
       const mockAgent = createMockAgent({ messages: makeMessages(20), extra: { auxModel: model as unknown as Model } })
-      const invocation = createInvocation({ turns: 1 })
-      invocation.turns = 5
+      const agentContext = createAgentContext({ turns: 1 })
+      agentContext.turns = 5
 
       const result = await manager.reduce({
         agent: mockAgent,
         model: model as unknown as Model,
         error: new ContextWindowOverflowError('overflow'),
-        invocation,
+        agentContext,
       })
 
       expect(result).toBe(true)
       expect(mockAgent.messages[0]!.content).toEqual([{ type: 'textBlock', text: 'Summary of conversation' }])
-      expect(invocation.usage).toEqual({ inputTokens: 4, outputTokens: 5, totalTokens: 9 })
-      expect(invocation.turns).toBe(5)
+      expect(agentContext.usage).toEqual({ inputTokens: 4, outputTokens: 5, totalTokens: 9 })
+      expect(agentContext.turns).toBe(5)
     })
   })
 

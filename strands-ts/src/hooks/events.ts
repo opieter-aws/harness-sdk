@@ -6,7 +6,7 @@ import type { ModelStreamEvent } from '../models/streaming.js'
 import type { Model } from '../models/model.js'
 import { interruptFromAgent, type Interrupt, type Interruptible } from '../interrupt.js'
 import type { InterruptParams } from '../types/interrupt.js'
-import type { Invocation } from '../agent/invocation.js'
+import type { AgentContext } from '../agent/agent-context.js'
 
 /**
  * Agent hook events.
@@ -86,7 +86,7 @@ export abstract class StreamEvent {}
  */
 export interface HookableEventData {
   /** The request the event belongs to, if any. */
-  invocation?: Invocation | undefined
+  agentContext?: AgentContext | undefined
 }
 
 /**
@@ -96,14 +96,14 @@ export interface HookableEventData {
  * potential future stream-only events that should not be hookable.
  */
 export abstract class HookableEvent extends StreamEvent {
-  /** The request this event belongs to (`undefined` outside one); pass it to {@link InvokeOptions.invocation} to join it. */
-  declare readonly invocation?: Invocation
+  /** The request this event belongs to (`undefined` outside one); pass it to {@link InvokeOptions.agentContext} to join it. */
+  declare readonly agentContext?: AgentContext
 
   constructor(data?: HookableEventData) {
     super()
     // Non-enumerable, so it stays out of equality checks, spreads, and enumeration of the event.
-    if (data?.invocation !== undefined) {
-      Object.defineProperty(this, 'invocation', { value: data.invocation, enumerable: false })
+    if (data?.agentContext !== undefined) {
+      Object.defineProperty(this, 'agentContext', { value: data.agentContext, enumerable: false })
     }
   }
 
@@ -198,8 +198,8 @@ export class AfterInvocationEvent extends HookableEvent {
    * When set, after this event's callbacks complete the agent re-enters its loop
    * with these args as new input, under the same invocation lock. A fresh
    * {@link BeforeInvocationEvent}/{@link AfterInvocationEvent} pair fires for the
-   * resumed run. Ignored if the invocation ended with an error or stopped on one
-   * of the request's limits, since a resumed run would stop again at once.
+   * resumed run. Ignored if the invocation ended with an error or one of the
+   * request's limits is reached, since a resumed run would stop again at once.
    *
    * If multiple callbacks set `resume`, the last callback to run wins.
    */

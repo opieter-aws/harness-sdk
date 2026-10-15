@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { Agent } from '../agent.js'
-import { toInternal } from '../invocation.js'
+import { unwrapAgentContext } from '../agent-context.js'
 import { AfterToolCallEvent, BeforeModelCallEvent } from '../../hooks/events.js'
 import { limitStopMessage, TextBlock, ToolResultBlock } from '../../types/messages.js'
 import { MockMessageModel } from '../../__fixtures__/mock-message-model.js'
 
-describe('AgentAsTool request-wide invocation', () => {
+describe('AgentAsTool request-wide agent context', () => {
   it('folds the inner agent model usage into the parent request total', async () => {
     const innerModel = new MockMessageModel().addTurn(
       { type: 'textBlock', text: 'inner-done' },
@@ -13,12 +13,12 @@ describe('AgentAsTool request-wide invocation', () => {
     )
     const inner = new Agent({ model: innerModel, name: 'inner', description: 'inner agent' })
 
-    let innerSawInvocation = false
+    let innerSawAgentContext = false
     let innerSeenOutputTokens: number | undefined
     inner.addHook(BeforeModelCallEvent, (event) => {
-      const invocation = toInternal(event.invocation)
-      innerSawInvocation = invocation !== undefined
-      innerSeenOutputTokens = invocation?.usage.outputTokens
+      const agentContext = unwrapAgentContext(event.agentContext)
+      innerSawAgentContext = agentContext !== undefined
+      innerSeenOutputTokens = agentContext?.usage.outputTokens
     })
 
     const outerModel = new MockMessageModel()
@@ -33,10 +33,7 @@ describe('AgentAsTool request-wide invocation', () => {
 
     await outer.invoke('run inner')
 
-    // Before the inner agent calls its model, the shared invocation already carries
-    // the parent's first-turn output tokens — proof the same Invocation object was
-    // threaded in, not a fresh per-agent one.
-    expect(innerSawInvocation).toBe(true)
+    expect(innerSawAgentContext).toBe(true)
     expect(innerSeenOutputTokens).toBe(60)
   })
 
@@ -57,8 +54,6 @@ describe('AgentAsTool request-wide invocation', () => {
       )
     const outer = new Agent({ model: outerModel, tools: [inner.asTool()] })
 
-    // After the first turn the parent and the child have emitted 60 tokens each; only
-    // their shared total reaches 100, so the limit trips before the parent's second turn.
     const result = await outer.invoke('run inner', { limits: { outputTokens: 100 } })
 
     expect(result.stopReason).toBe('limitOutputTokens')
@@ -84,7 +79,6 @@ describe('AgentAsTool request-wide invocation', () => {
       toolResult = event.result
     })
 
-    // The parent's first turn already spends the limit, so the child stops before its first model call.
     const result = await outer.invoke('run inner', { limits: { outputTokens: 50 } })
 
     expect(result.stopReason).toBe('limitOutputTokens')

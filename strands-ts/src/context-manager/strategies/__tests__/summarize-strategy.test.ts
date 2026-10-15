@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { Offload } from '../offload/index.js'
 import { summarizeContent } from '../../methods/summarize.js'
-import { createInvocation } from '../../../agent/invocation.js'
+import { createAgentContext } from '../../../agent/agent-context.js'
 import { Message, TextBlock, ToolResultBlock } from '../../../types/messages.js'
 import { createMockAgent } from '../../../__fixtures__/agent-helpers.js'
 import { MockMessageModel } from '../../../__fixtures__/mock-message-model.js'
@@ -202,7 +202,6 @@ describe('Offload.summarize', () => {
     it('adds the summarizer usage to the request total even when the request limit is used up', async () => {
       const actualSummarize =
         await vi.importActual<typeof import('../../methods/summarize.js')>('../../methods/summarize.js')
-      // The real summarizer is what routes the model call through ModelProxy.
       vi.mocked(summarizeContent).mockImplementationOnce(actualSummarize.summarizeContent)
       const summarizer = new MockMessageModel().addTurn(
         { type: 'textBlock', text: 'Summary of tool output' },
@@ -210,10 +209,10 @@ describe('Offload.summarize', () => {
       )
       const messages = [makeToolResultMessage('x'.repeat(2500 * 4 + 100))]
       const strategy = Offload.summarize('toolResults', { model: summarizer })
-      const invocation = createInvocation({ turns: 1 })
-      invocation.turns = 5
+      const agentContext = createAgentContext({ turns: 1 })
+      agentContext.turns = 5
 
-      const result = await strategy.apply({ ...makeContext(messages, 0.9, { stream: vi.fn() }), invocation })
+      const result = await strategy.apply({ ...makeContext(messages, 0.9, { stream: vi.fn() }), agentContext })
 
       expect(result).toBe(true)
       expect(messages[0]!.content).toEqual([
@@ -223,8 +222,8 @@ describe('Offload.summarize', () => {
           content: [new TextBlock('[Summarized: tool result, ~2,525 tokens]\n\nSummary of tool output')],
         }),
       ])
-      expect(invocation.usage).toEqual({ inputTokens: 4, outputTokens: 5, totalTokens: 9 })
-      expect(invocation.turns).toBe(5)
+      expect(agentContext.usage).toEqual({ inputTokens: 4, outputTokens: 5, totalTokens: 9 })
+      expect(agentContext.turns).toBe(5)
     })
   })
 })
