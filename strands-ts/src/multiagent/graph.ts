@@ -1,11 +1,11 @@
 import type { AttributeValue } from '@opentelemetry/api'
 import type { InvocationState, InvokableAgent } from '../types/agent.js'
 import {
-  createAgentContext,
-  unwrapAgentContext,
-  type AgentContextImplementation,
-  type AgentContext,
-} from '../agent/agent-context.js'
+  createInvocationContext,
+  unwrapInvocationContext,
+  type InvocationContextImplementation,
+  type InvocationContext,
+} from '../agent/invocation-context.js'
 import type { MultiAgentContentInput, MultiAgentInput, MultiAgentInvokeOptions } from './multiagent.js'
 import {
   applyOrchestratorHookResponses,
@@ -257,11 +257,11 @@ export class Graph implements MultiAgent {
     // child agent so mutations in one node are visible in the next.
     const invocationState: InvocationState = options?.invocationState ?? {}
 
-    const agentContext = unwrapAgentContext(options?.agentContext) ?? createAgentContext()
+    const invocationContext = unwrapInvocationContext(options?.invocationContext) ?? createInvocationContext()
 
     // Hook invocation lives in `_stream` so hook-raised `InterruptError`s land in the
     // same frame as the execution loop.
-    const gen = this._stream(input, invocationState, agentContext, options?.cancelSignal)
+    const gen = this._stream(input, invocationState, invocationContext, options?.cancelSignal)
     try {
       let next = await gen.next()
       while (!next.done) {
@@ -277,7 +277,7 @@ export class Graph implements MultiAgent {
   private async *_stream(
     input: MultiAgentInput,
     invocationState: InvocationState,
-    agentContext: AgentContextImplementation,
+    invocationContext: InvocationContextImplementation,
     externalCancelSignal?: AbortSignal
   ): AsyncGenerator<MultiAgentStreamEvent, MultiAgentResult, undefined> {
     // Reuse state from a prior INTERRUPTED run so `graph.invoke(responses)` can
@@ -381,7 +381,7 @@ export class Graph implements MultiAgent {
 
           streams.set(
             node.id,
-            this._streamNode(node, nodeInput, state, queue, nodeSpan, invocationState, agentContext, cancelSignal)
+            this._streamNode(node, nodeInput, state, queue, nodeSpan, invocationState, invocationContext, cancelSignal)
           )
         }
 
@@ -436,7 +436,7 @@ export class Graph implements MultiAgent {
         results: state.results,
         content: this._resolveContent(state),
         duration: Date.now() - state.startTime,
-        requestUsage: agentContext.requestUsage,
+        requestUsage: invocationContext.requestUsage,
       })
       // Stash on interrupt so same-instance resume has state; otherwise start fresh.
       if (result.status === Status.INTERRUPTED) {
@@ -535,7 +535,7 @@ export class Graph implements MultiAgent {
     queue: Queue<NodeExecutionOutput>,
     nodeSpan: Span | null,
     invocationState: InvocationState,
-    agentContext: AgentContext,
+    invocationContext: InvocationContext,
     executionSignal?: AbortSignal
   ): Promise<void> {
     // Per-node timeout only applies to AgentNode; a nested MultiAgentNode manages
@@ -551,7 +551,7 @@ export class Graph implements MultiAgent {
     try {
       const nodeOptions: NodeInputOptions = {
         invocationState,
-        agentContext,
+        invocationContext,
         ...(cancelSignal && { cancelSignal }),
         ...(this._canRunConcurrently && { bufferOutput: true }),
       }

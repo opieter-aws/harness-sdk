@@ -8,7 +8,7 @@ import { logger } from '../../../logging/logger.js'
 import { Message, TextBlock, ToolResultBlock } from '../../../types/messages.js'
 import type { ContentBlock } from '../../../types/messages.js'
 import type { Model } from '../../../models/model.js'
-import type { AgentContext } from '../../../agent/agent-context.js'
+import type { InvocationContext } from '../../../agent/invocation-context.js'
 import type { LocalAgent } from '../../../types/agent.js'
 import type { ContextStrategy, ContextState } from '../../types.js'
 import {
@@ -74,7 +74,7 @@ export class SummarizeStrategy extends BaseOffloadStrategy {
     if (safe.length === 0) return false
 
     const contentBlocks = flattenMessagesToContent(safe)
-    const summary = await summarizeContent(contentBlocks, model, this._config, context.agentContext)
+    const summary = await summarizeContent(contentBlocks, model, this._config, context.invocationContext)
     if (!summary) return false
 
     const totalTokens = await model.countTokens(safe)
@@ -92,7 +92,7 @@ export class SummarizeStrategy extends BaseOffloadStrategy {
     message: Message,
     agent: LocalAgent,
     stashRefs: string[],
-    agentContext?: AgentContext
+    invocationContext?: InvocationContext
   ): Promise<ContentBlock | null> {
     const model = this._resolveModel(agent)
     if (!model) return null
@@ -102,7 +102,7 @@ export class SummarizeStrategy extends BaseOffloadStrategy {
         toolResultToContentBlocks(block.content),
         model,
         this._config,
-        agentContext
+        invocationContext
       )
       if (!summary) return null
 
@@ -115,14 +115,14 @@ export class SummarizeStrategy extends BaseOffloadStrategy {
     }
 
     if (block instanceof TextBlock) {
-      const summary = await summarizeContent([new TextBlock(block.text)], model, this._config, agentContext)
+      const summary = await summarizeContent([new TextBlock(block.text)], model, this._config, invocationContext)
       if (!summary) return null
 
       logger.debug(`trackingId=<${message.trackingId}>, tokens=<${tokens}> | summarized text block`)
       return new TextBlock(`${formatSummarized('text block', tokens, summary)}${formatStashRefs(stashRefs)}`)
     }
 
-    const summary = await summarizeContent([block], model, this._config, agentContext)
+    const summary = await summarizeContent([block], model, this._config, invocationContext)
     if (summary) {
       logger.debug(`trackingId=<${message.trackingId}>, tokens=<${tokens}> | summarized media block`)
       return new TextBlock(`${formatSummarized('media block', tokens, summary)}${formatStashRefs(stashRefs)}`)

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { Offload } from '../offload/index.js'
 import { summarizeContent } from '../../methods/summarize.js'
-import { createAgentContext } from '../../../agent/agent-context.js'
+import { createInvocationContext } from '../../../agent/invocation-context.js'
 import { Message, TextBlock, ToolResultBlock, ToolUseBlock } from '../../../types/messages.js'
 import { createMockAgent } from '../../../__fixtures__/agent-helpers.js'
 import { MockMessageModel } from '../../../__fixtures__/mock-message-model.js'
@@ -210,10 +210,10 @@ describe('Offload.summarize', () => {
       )
       const messages = [makeToolResultMessage('x'.repeat(2500 * 4 + 100))]
       const strategy = Offload.summarize('toolResults', { model: summarizer })
-      const agentContext = createAgentContext({ turns: 1 })
-      agentContext.turns = 5
+      const invocationContext = createInvocationContext({ turns: 1 })
+      invocationContext.turns = 5
 
-      const result = await strategy.apply({ ...makeContext(messages, 0.9, { stream: vi.fn() }), agentContext })
+      const result = await strategy.apply({ ...makeContext(messages, 0.9, { stream: vi.fn() }), invocationContext })
 
       expect(result).toBe(true)
       expect(messages[0]!.content).toEqual([
@@ -223,8 +223,8 @@ describe('Offload.summarize', () => {
           content: [new TextBlock('[Summarized: tool result, ~2,525 tokens]\n\nSummary of tool output')],
         }),
       ])
-      expect(agentContext.usage).toEqual({ inputTokens: 4, outputTokens: 5, totalTokens: 9 })
-      expect(agentContext.turns).toBe(5)
+      expect(invocationContext.usage).toEqual({ inputTokens: 4, outputTokens: 5, totalTokens: 9 })
+      expect(invocationContext.turns).toBe(5)
     })
   })
 })

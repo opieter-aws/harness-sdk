@@ -1,7 +1,7 @@
 import { Agent } from '../agent/agent.js'
 import { AgentPrinter, type Printer } from '../agent/printer.js'
 import type { InvocationState, InvokableAgent, InvokeOptions, AgentStreamEvent } from '../types/agent.js'
-import type { AgentContext } from '../agent/agent-context.js'
+import type { InvocationContext } from '../agent/invocation-context.js'
 import type { MultiAgentInput, MultiAgentInvokeOptions } from './multiagent.js'
 import { dropStaleInterruptedResult } from './multiagent.js'
 import type { MultiAgentStreamEvent } from './events.js'
@@ -59,7 +59,7 @@ export interface NodeInputOptions {
   bufferOutput?: boolean
 
   /** The request this node runs as part of, forwarded to its underlying agent or orchestrator. */
-  agentContext?: AgentContext
+  invocationContext?: InvocationContext
 }
 
 /**
@@ -268,7 +268,7 @@ export class AgentNode extends Node {
     // Resolve once per handle() call — Node.stream() normally supplies this;
     // handle() is public API, so direct callers get per-call state.
     const invocationState: InvocationState = options?.invocationState ?? {}
-    const agentContext = options?.agentContext
+    const invocationContext = options?.invocationContext
 
     // Only Agent instances support snapshot/restore for state isolation.
     // When `preserveContext` is set, skip the snapshot/restore cycle so the agent
@@ -299,7 +299,7 @@ export class AgentNode extends Node {
       const invokeOptions: InvokeOptions = {
         ...(options?.structuredOutputSchema && { structuredOutputSchema: options.structuredOutputSchema }),
         ...(options?.cancelSignal && { cancelSignal: options.cancelSignal }),
-        ...(agentContext && { agentContext }),
+        ...(invocationContext && { invocationContext }),
         invocationState,
       }
 
@@ -403,12 +403,12 @@ export class MultiAgentNode extends Node {
     // Resolve once per handle() call — Node.stream() normally supplies this;
     // handle() is public API, so direct callers get per-call state.
     const invocationState: InvocationState = options?.invocationState ?? {}
-    const agentContext = options?.agentContext
+    const invocationContext = options?.invocationContext
 
     const nestedOptions: MultiAgentInvokeOptions = {
       invocationState,
       ...(options?.cancelSignal && { cancelSignal: options.cancelSignal }),
-      ...(agentContext && { agentContext }),
+      ...(invocationContext && { invocationContext }),
     }
     const gen = this._orchestrator.stream(input, nestedOptions)
     let next = await gen.next()

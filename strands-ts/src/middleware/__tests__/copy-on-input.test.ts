@@ -176,7 +176,7 @@ describe('InvokeModelStage copy-on-input isolation', () => {
       expect(contextKeys.sort()).toEqual(
         [
           'agent',
-          'agentContext',
+          'invocationContext',
           'invocationState',
           'messages',
           'model',

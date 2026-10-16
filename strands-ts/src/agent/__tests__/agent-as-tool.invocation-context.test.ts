@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { Agent } from '../agent.js'
-import { unwrapAgentContext } from '../agent-context.js'
+import { unwrapInvocationContext } from '../invocation-context.js'
 import { AfterToolCallEvent, BeforeModelCallEvent } from '../../hooks/events.js'
 import { limitStopMessage, TextBlock, ToolResultBlock } from '../../types/messages.js'
 import { MockMessageModel } from '../../__fixtures__/mock-message-model.js'
 
-describe('AgentAsTool request-wide agent context', () => {
+describe('AgentAsTool request-wide invocation context', () => {
   it('folds the inner agent model usage into the parent request total', async () => {
     const innerModel = new MockMessageModel().addTurn(
       { type: 'textBlock', text: 'inner-done' },
@@ -13,12 +13,12 @@ describe('AgentAsTool request-wide agent context', () => {
     )
     const inner = new Agent({ model: innerModel, name: 'inner', description: 'inner agent' })
 
-    let innerSawAgentContext = false
+    let innerSawInvocationContext = false
     let innerSeenOutputTokens: number | undefined
     inner.addHook(BeforeModelCallEvent, (event) => {
-      const agentContext = unwrapAgentContext(event.agentContext)
-      innerSawAgentContext = agentContext !== undefined
-      innerSeenOutputTokens = agentContext?.usage.outputTokens
+      const invocationContext = unwrapInvocationContext(event.invocationContext)
+      innerSawInvocationContext = invocationContext !== undefined
+      innerSeenOutputTokens = invocationContext?.usage.outputTokens
     })
 
     const outerModel = new MockMessageModel()
@@ -33,7 +33,7 @@ describe('AgentAsTool request-wide agent context', () => {
 
     await outer.invoke('run inner')
 
-    expect(innerSawAgentContext).toBe(true)
+    expect(innerSawInvocationContext).toBe(true)
     expect(innerSeenOutputTokens).toBe(60)
   })
 

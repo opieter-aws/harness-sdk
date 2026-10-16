@@ -62,11 +62,11 @@
 
 import { Agent } from '../../agent/agent.js'
 import {
-  createAuxiliaryAgentContext,
+  createAuxiliaryInvocationContext,
   reachedLimit,
-  unwrapAgentContext,
-  type AgentContext,
-} from '../../agent/agent-context.js'
+  unwrapInvocationContext,
+  type InvocationContext,
+} from '../../agent/invocation-context.js'
 import { AfterInvocationEvent, BeforeInvocationEvent, BeforeModelCallEvent } from '../../hooks/events.js'
 import { logger } from '../../logging/logger.js'
 import { warnOnce } from '../../logging/warn-once.js'
@@ -358,9 +358,9 @@ export class GoalLoop implements Plugin {
       }
 
       const response = lastAssistantMessage(agent.messages)
-      const agentContext = unwrapAgentContext(event.agentContext)
+      const invocationContext = unwrapInvocationContext(event.invocationContext)
       // The request's limit stopped this pass before it produced a new answer, so there is nothing to grade.
-      if (response === run.answerBeforePass && agentContext && reachedLimit(agentContext)) {
+      if (response === run.answerBeforePass && invocationContext && reachedLimit(invocationContext)) {
         finishRun(run, 'limit')
         return
       }
@@ -371,7 +371,7 @@ export class GoalLoop implements Plugin {
 
       let outcome: ValidationOutcome
       try {
-        outcome = await validator(response, event.agentContext)
+        outcome = await validator(response, event.invocationContext)
       } catch (validatorError) {
         // Surface validator throws so a buggy validator (e.g. a TypeError that
         // fails identically on every attempt) is visible in logs rather than
@@ -394,7 +394,7 @@ export class GoalLoop implements Plugin {
         finishRun(run, 'maxAttempts')
         return
       }
-      if (agentContext && reachedLimit(agentContext)) {
+      if (invocationContext && reachedLimit(invocationContext)) {
         finishRun(run, 'limit')
         return
       }
@@ -416,7 +416,7 @@ export class GoalLoop implements Plugin {
    */
   private _buildValidator(
     hostAgent: LocalAgent
-  ): (response: Message, agentContext?: AgentContext) => Promise<ValidationOutcome> {
+  ): (response: Message, invocationContext?: InvocationContext) => Promise<ValidationOutcome> {
     const validator = this._validator
     if (validator) {
       return async (response) => {
@@ -430,16 +430,16 @@ export class GoalLoop implements Plugin {
     // The NL judge intentionally ignores the `response` argument — its prompt
     // includes the full host transcript (via `buildJudgePrompt`) so the judge
     // can evaluate against context, not just the last assistant turn.
-    return async (_response, agentContext) => {
+    return async (_response, invocationContext) => {
       const judge = new Agent({
         model: this._judgeModel ?? hostAgent.auxModel,
         printer: false,
         systemPrompt: this._judgeSystemPrompt,
       })
-      const auxiliaryAgentContext = createAuxiliaryAgentContext(agentContext)
+      const auxiliaryInvocationContext = createAuxiliaryInvocationContext(invocationContext)
       const invokeOptions: InvokeOptions = {
         structuredOutputSchema: JUDGE_OUTCOME_SCHEMA,
-        ...(auxiliaryAgentContext && { agentContext: auxiliaryAgentContext }),
+        ...(auxiliaryInvocationContext && { invocationContext: auxiliaryInvocationContext }),
       }
       const judgeResult = await judge.invoke(buildJudgePrompt(goalDescription, hostAgent.messages), invokeOptions)
       return (

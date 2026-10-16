@@ -1,13 +1,17 @@
 import { describe, expect, it } from 'vitest'
 import { Agent } from '../../agent/agent.js'
-import { createAgentContext, unwrapAgentContext, type AgentContextImplementation } from '../../agent/agent-context.js'
+import {
+  createInvocationContext,
+  unwrapInvocationContext,
+  type InvocationContextImplementation,
+} from '../../agent/invocation-context.js'
 import { limitStopMessage } from '../../types/messages.js'
 import { AfterInvocationEvent } from '../../hooks/events.js'
 import { MockMessageModel } from '../../__fixtures__/mock-message-model.js'
 import { Graph } from '../graph.js'
 import { Status } from '../state.js'
 
-describe('Graph request-wide agent context', () => {
+describe('Graph request-wide invocation context', () => {
   it('folds every node model usage and turn into one shared request total', async () => {
     const agentA = new Agent({
       model: new MockMessageModel().addTurn(
@@ -26,9 +30,9 @@ describe('Graph request-wide agent context', () => {
       id: 'b',
     })
 
-    let shared: AgentContextImplementation | undefined
+    let shared: InvocationContextImplementation | undefined
     agentB.addHook(AfterInvocationEvent, (event) => {
-      shared = unwrapAgentContext(event.agentContext)
+      shared = unwrapInvocationContext(event.invocationContext)
     })
 
     const graph = new Graph({
@@ -53,10 +57,10 @@ describe('Graph request-wide agent context', () => {
       id: 'analyst',
     })
     const graph = new Graph({ nodes: [analyst], edges: [] })
-    const request = createAgentContext()
+    const request = createInvocationContext()
     request.recordUsage({ inputTokens: 100, outputTokens: 100, totalTokens: 200 })
 
-    const result = await graph.invoke('analyze', { agentContext: createAgentContext({ turns: 5 }, request) })
+    const result = await graph.invoke('analyze', { invocationContext: createInvocationContext({ turns: 5 }, request) })
 
     expect(result.requestUsage).toBe(request.usage)
     expect(request.usage).toEqual({ inputTokens: 102, outputTokens: 103, totalTokens: 205 })
@@ -69,10 +73,10 @@ describe('Graph request-wide agent context', () => {
       id: 'analyst',
     })
     const graph = new Graph({ nodes: [analyst], edges: [] })
-    const spentRequest = createAgentContext({ turns: 1 })
+    const spentRequest = createInvocationContext({ turns: 1 })
     spentRequest.turns = 1
 
-    const result = await graph.invoke('analyze', { agentContext: spentRequest })
+    const result = await graph.invoke('analyze', { invocationContext: spentRequest })
 
     expect(result.results).toEqual([
       expect.objectContaining({

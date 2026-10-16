@@ -74,7 +74,11 @@ export class ModelExtractor implements Extractor {
     let result: Awaited<ReturnType<ReturnType<typeof model.streamAggregated>['next']>> | undefined
     try {
       const proxy = new ModelProxy(model)
-      const stream = proxy.streamAggregated(promptMessages, { systemPrompt: this._systemPrompt }, context?.agentContext)
+      const stream = proxy.streamAggregated(
+        promptMessages,
+        { systemPrompt: this._systemPrompt },
+        context?.invocationContext
+      )
       // Manual .next() loop: streamAggregated returns its result as the generator return value
       // (done:true), which for-await-of discards.
       for (;;) {

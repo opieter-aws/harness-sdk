@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { Agent } from '../../agent/agent.js'
-import { createAuxiliaryAgentContext } from '../../agent/agent-context.js'
+import { createAuxiliaryInvocationContext } from '../../agent/invocation-context.js'
 import type { InvokeOptions } from '../../types/agent.js'
 import type { BeforeToolCallEvent } from '../../hooks/events.js'
 import type { Model } from '../../models/model.js'
@@ -89,9 +89,9 @@ export function createLlmRiskClassifier(config?: LlmClassifierConfig): HumanInTh
     })
 
     const prompt = `Should this tool call require human approval?\n\nTool: ${event.toolUse.name}\nInput: ${JSON.stringify(event.toolUse.input, null, 2)}`
-    const auxiliaryAgentContext = createAuxiliaryAgentContext(event.agentContext)
+    const auxiliaryInvocationContext = createAuxiliaryInvocationContext(event.invocationContext)
     const invokeOptions: InvokeOptions = {
-      ...(auxiliaryAgentContext && { agentContext: auxiliaryAgentContext }),
+      ...(auxiliaryInvocationContext && { invocationContext: auxiliaryInvocationContext }),
     }
     const result = await inner.invoke(prompt, invokeOptions)
     const decision = RISK_DECISION.parse(result.structuredOutput)

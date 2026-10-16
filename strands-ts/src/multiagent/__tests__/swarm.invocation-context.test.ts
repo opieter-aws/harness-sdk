@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { Agent } from '../../agent/agent.js'
-import { unwrapAgentContext, type AgentContextImplementation } from '../../agent/agent-context.js'
+import { unwrapInvocationContext, type InvocationContextImplementation } from '../../agent/invocation-context.js'
 import { AfterInvocationEvent } from '../../hooks/events.js'
 import { MockMessageModel } from '../../__fixtures__/mock-message-model.js'
 import type { JSONValue } from '../../types/json.js'
@@ -27,14 +27,14 @@ function makeHandoffAgent(id: string, nextAgentId: string | undefined, usage: Us
   return new Agent({ model, printer: false, id, description: `Agent ${id}` })
 }
 
-describe('Swarm request-wide agent context', () => {
+describe('Swarm request-wide invocation context', () => {
   it('folds every node model usage into one shared request total', async () => {
     const agentA = makeHandoffAgent('a', 'b', { inputTokens: 10, outputTokens: 25, totalTokens: 35 })
     const agentB = makeHandoffAgent('b', undefined, { inputTokens: 20, outputTokens: 35, totalTokens: 55 })
 
-    let shared: AgentContextImplementation | undefined
+    let shared: InvocationContextImplementation | undefined
     agentB.addHook(AfterInvocationEvent, (event) => {
-      shared = unwrapAgentContext(event.agentContext)
+      shared = unwrapInvocationContext(event.invocationContext)
     })
 
     const swarm = new Swarm({ nodes: [agentA, agentB], start: 'a' })

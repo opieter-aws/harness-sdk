@@ -7,7 +7,7 @@ import type { Stash } from './stash.js'
 import type { LocalAgent } from '../types/agent.js'
 import type { Message } from '../types/messages.js'
 import type { StrategyPresetName } from './presets.js'
-import type { AgentContext } from '../agent/agent-context.js'
+import type { InvocationContext } from '../agent/invocation-context.js'
 
 /**
  * A context reduction strategy that can offload, summarize, or otherwise
@@ -61,7 +61,7 @@ export interface ContextState {
   stash?: Stash
 
   /** The request this reduction runs for, if any; a nested call that joins it adds to the request's usage, but the request's limits don't apply. */
-  readonly agentContext?: AgentContext
+  readonly invocationContext?: InvocationContext
 }
 
 /**

@@ -6,7 +6,7 @@ import type { ModelStreamEvent } from '../models/streaming.js'
 import type { Model } from '../models/model.js'
 import { interruptFromAgent, type Interrupt, type Interruptible } from '../interrupt.js'
 import type { InterruptParams } from '../types/interrupt.js'
-import type { AgentContext } from '../agent/agent-context.js'
+import type { InvocationContext } from '../agent/invocation-context.js'
 
 /**
  * Agent hook events.
@@ -86,7 +86,7 @@ export abstract class StreamEvent {}
  */
 export interface HookableEventData {
   /** The request the event belongs to, if any. */
-  agentContext?: AgentContext | undefined
+  invocationContext?: InvocationContext | undefined
 }
 
 /**
@@ -96,14 +96,14 @@ export interface HookableEventData {
  * potential future stream-only events that should not be hookable.
  */
 export abstract class HookableEvent extends StreamEvent {
-  /** The request this event belongs to (`undefined` outside one); pass it to {@link InvokeOptions.agentContext} to join it. */
-  declare readonly agentContext?: AgentContext
+  /** The request this event belongs to (`undefined` outside one); pass it to {@link InvokeOptions.invocationContext} to join it. */
+  declare readonly invocationContext?: InvocationContext
 
   constructor(data?: HookableEventData) {
     super()
     // Non-enumerable, so it stays out of equality checks, spreads, and enumeration of the event.
-    if (data?.agentContext !== undefined) {
-      Object.defineProperty(this, 'agentContext', { value: data.agentContext, enumerable: false })
+    if (data?.invocationContext !== undefined) {
+      Object.defineProperty(this, 'invocationContext', { value: data.invocationContext, enumerable: false })
     }
   }
 
@@ -688,7 +688,7 @@ export class ToolResultEvent extends HookableEvent {
 
 /**
  * Event triggered for each streaming progress event from a tool during execution.
- * Wraps a {@link ToolStreamEvent} with agent context, keeping the tool authoring
+ * Wraps a {@link ToolStreamEvent} with invocation context, keeping the tool authoring
  * interface unchanged — tools construct `ToolStreamEvent` without knowledge of agents
  * or hooks, and the agent layer wraps them at the boundary.
  *

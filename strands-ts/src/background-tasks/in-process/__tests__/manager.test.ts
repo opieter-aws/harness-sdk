@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
 
 import { createMockAgent } from '../../../__fixtures__/agent-helpers.js'
-import { createAgentContext, type AgentContext } from '../../../agent/agent-context.js'
+import { createInvocationContext, type InvocationContext } from '../../../agent/invocation-context.js'
 import { Interrupt, InterruptError } from '../../../interrupt.js'
 import { tool } from '../../../tools/tool-factory.js'
 import type { Tool, ToolContext } from '../../../tools/tool.js'
@@ -76,11 +76,11 @@ describe('InProcessTaskManager', () => {
     await expect(manager.get(admitted.taskId)).resolves.toBeUndefined()
   })
 
-  it('runs a task under the agent context captured when it was submitted', async () => {
-    const agentContext = createAgentContext()
-    let runAgentContext: AgentContext | undefined
+  it('runs a task under the invocation context captured when it was submitted', async () => {
+    const invocationContext = createInvocationContext()
+    let runInvocationContext: InvocationContext | undefined
     const { manager, work } = createFixture((_input, context) => {
-      runAgentContext = context?.agentContext
+      runInvocationContext = context?.invocationContext
       return 'done'
     })
 
@@ -89,11 +89,11 @@ describe('InProcessTaskManager', () => {
       {},
       'pass-1',
       work,
-      agentContext
+      invocationContext
     )
     await manager.waitForIdle()
 
-    expect(runAgentContext).toBe(agentContext)
+    expect(runInvocationContext).toBe(invocationContext)
   })
 
   it('deduplicates repeated submissions within one pass', async () => {

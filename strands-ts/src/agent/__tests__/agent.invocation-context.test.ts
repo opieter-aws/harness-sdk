@@ -1,12 +1,12 @@
 import { describe, expect, it, vi } from 'vitest'
 import { Agent } from '../agent.js'
 import {
-  createAgentContext,
-  createAuxiliaryAgentContext,
-  AgentContextImplementation,
-  unwrapAgentContext,
-  type AgentContext,
-} from '../agent-context.js'
+  createInvocationContext,
+  createAuxiliaryInvocationContext,
+  InvocationContextImplementation,
+  unwrapInvocationContext,
+  type InvocationContext,
+} from '../invocation-context.js'
 import { AfterInvocationEvent, BeforeInvocationEvent, BeforeModelCallEvent } from '../../hooks/events.js'
 import { tool } from '../../tools/tool-factory.js'
 import type { ToolContext } from '../../tools/tool.js'
@@ -68,9 +68,9 @@ describe('Agent request-wide limits', () => {
       printer: false,
     })
 
-    const inherited = createAgentContext({ turns: 1 })
+    const inherited = createInvocationContext({ turns: 1 })
     inherited.turns = 5
-    const result = await agent.invoke('go', { agentContext: inherited })
+    const result = await agent.invoke('go', { invocationContext: inherited })
 
     expect(result.stopReason).toBe('limitTurns')
     expect(result.lastMessage).toEqual(new Message({ role: 'assistant', content: [], trackingId: anyTrackingId }))
@@ -139,10 +139,10 @@ describe('Agent request-wide limits', () => {
       ),
       printer: false,
     })
-    const enclosing = createAgentContext()
+    const enclosing = createInvocationContext()
     enclosing.recordUsage({ inputTokens: 4000, outputTokens: 4000, totalTokens: 8000 })
 
-    const result = await agent.invoke('go', { agentContext: enclosing, limits: { totalTokens: 5000 } })
+    const result = await agent.invoke('go', { invocationContext: enclosing, limits: { totalTokens: 5000 } })
 
     expect({ stopReason: result.stopReason, requestUsage: result.requestUsage }).toEqual({
       stopReason: 'endTurn',
@@ -156,10 +156,10 @@ describe('Agent request-wide limits', () => {
       .addTurn([{ type: 'toolUseBlock', name: 'loop', toolUseId: 'tu-1', input: {} }])
       .addTurn([{ type: 'toolUseBlock', name: 'loop', toolUseId: 'tu-2', input: {} }])
     const agent = new Agent({ model, tools: [loopTool], printer: false })
-    const request = createAgentContext({ turns: 2 })
+    const request = createInvocationContext({ turns: 2 })
     request.turns = 1
 
-    const result = await agent.invoke('go', { agentContext: request, limits: { turns: 5 } })
+    const result = await agent.invoke('go', { invocationContext: request, limits: { turns: 5 } })
 
     expect({ stopReason: result.stopReason, modelCalls: model.callCount, requestTurns: request.turns }).toEqual({
       stopReason: 'limitTurns',
@@ -176,9 +176,9 @@ describe('Agent request-wide limits', () => {
       })
       .addTurn({ type: 'textBlock', text: 'never reached' })
     const agent = new Agent({ model, tools: [loopTool], printer: false })
-    const enclosing = createAgentContext({ turns: 10 })
+    const enclosing = createInvocationContext({ turns: 10 })
 
-    const result = await agent.invoke('go', { agentContext: enclosing, limits: { turns: 1 } })
+    const result = await agent.invoke('go', { invocationContext: enclosing, limits: { turns: 1 } })
 
     expect(result.stopReason).toBe('limitTurns')
     expect(model.callCount).toBe(1)
@@ -189,9 +189,9 @@ describe('Agent request-wide limits', () => {
   })
 
   it('folds an auxiliary call into the request total without limiting it', async () => {
-    const parentAgentContext = createAgentContext({ turns: 1 })
-    parentAgentContext.recordUsage({ inputTokens: 1, outputTokens: 2, totalTokens: 3 })
-    parentAgentContext.turns = 5
+    const parentInvocationContext = createInvocationContext({ turns: 1 })
+    parentInvocationContext.recordUsage({ inputTokens: 1, outputTokens: 2, totalTokens: 3 })
+    parentInvocationContext.turns = 5
 
     const aux = new Agent({
       model: new MockMessageModel().addTurn(
@@ -202,14 +202,14 @@ describe('Agent request-wide limits', () => {
     })
 
     const result = await aux.invoke('go', {
-      agentContext: createAuxiliaryAgentContext(parentAgentContext)!,
+      invocationContext: createAuxiliaryInvocationContext(parentInvocationContext)!,
     })
 
     expect(result.stopReason).toBe('endTurn')
-    expect(parentAgentContext.usage).toEqual({ inputTokens: 5, outputTokens: 7, totalTokens: 12 })
+    expect(parentInvocationContext.usage).toEqual({ inputTokens: 5, outputTokens: 7, totalTokens: 12 })
   })
 
-  it('joins the request when a hand-written tool forwards context.agentContext', async () => {
+  it('joins the request when a hand-written tool forwards context.invocationContext', async () => {
     const sub = new Agent({
       model: new MockMessageModel().addTurn(
         { type: 'textBlock', text: 'sub done' },
@@ -223,7 +223,7 @@ describe('Agent request-wide limits', () => {
       description: 'runs the sub-agent',
       callback: async (_input: unknown, context: ToolContext) => {
         const subResult = await sub.invoke('go', {
-          ...(context.agentContext && { agentContext: context.agentContext }),
+          ...(context.invocationContext && { invocationContext: context.invocationContext }),
         })
         return subResult.stopReason
       },
@@ -264,20 +264,20 @@ describe('Agent request-wide limits', () => {
 
     await agent.invoke('go')
 
-    const agentContext = modelCallEvents[0]?.agentContext
-    expect(agentContext).toBeInstanceOf(AgentContextImplementation)
-    expect(modelCallEvents[1]?.agentContext).toBe(agentContext)
-    expect(probeContext?.agentContext).toBe(agentContext)
+    const invocationContext = modelCallEvents[0]?.invocationContext
+    expect(invocationContext).toBeInstanceOf(InvocationContextImplementation)
+    expect(modelCallEvents[1]?.invocationContext).toBe(invocationContext)
+    expect(probeContext?.invocationContext).toBe(invocationContext)
   })
 
-  it('rejects an agent context the SDK did not create', async () => {
+  it('rejects an invocation context the SDK did not create', async () => {
     const agent = new Agent({
       model: new MockMessageModel().addTurn({ type: 'textBlock', text: 'done' }),
       printer: false,
     })
 
-    await expect(agent.invoke('hi', { agentContext: {} as AgentContext })).rejects.toThrow(
-      'agentContext was not created by the SDK'
+    await expect(agent.invoke('hi', { invocationContext: {} as InvocationContext })).rejects.toThrow(
+      'invocationContext was not created by the SDK'
     )
   })
 
@@ -296,12 +296,12 @@ describe('Agent request-wide limits', () => {
     await agent.invoke('one')
     await agent.invoke('two')
 
-    const firstAgentContext = modelCallEvents[0]?.agentContext
-    const secondAgentContext = modelCallEvents[1]?.agentContext
-    expect(firstAgentContext).toBeDefined()
-    expect(secondAgentContext).toBeDefined()
-    expect(secondAgentContext).not.toBe(firstAgentContext)
-    expect(unwrapAgentContext(secondAgentContext)?.turns).toBe(1)
+    const firstInvocationContext = modelCallEvents[0]?.invocationContext
+    const secondInvocationContext = modelCallEvents[1]?.invocationContext
+    expect(firstInvocationContext).toBeDefined()
+    expect(secondInvocationContext).toBeDefined()
+    expect(secondInvocationContext).not.toBe(firstInvocationContext)
+    expect(unwrapInvocationContext(secondInvocationContext)?.turns).toBe(1)
   })
 
   it('ends on a limit stop even when a hook asks to resume', async () => {

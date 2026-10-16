@@ -1,4 +1,4 @@
-import { unwrapAgentContext, type AgentContext } from '../agent/agent-context.js'
+import { unwrapInvocationContext, type InvocationContext } from '../agent/invocation-context.js'
 import type { ContentBlock, Message } from '../types/messages.js'
 import type { Model, StreamAggregatedResult, StreamOptions } from './model.js'
 import type { ModelStreamEvent } from './streaming.js'
@@ -6,7 +6,7 @@ import type { ModelStreamEvent } from './streaming.js'
 /**
  * SDK-internal wrapper that adds a model call's token usage to its request. The
  * agent loop and every auxiliary call route their model calls through it. The
- * {@link AgentContext} is passed per call rather than on {@link StreamOptions},
+ * {@link InvocationContext} is passed per call rather than on {@link StreamOptions},
  * so providers never see request state. Usage is added only when the call
  * returns normally and the provider reported it; a thrown error passes through
  * and adds nothing.
@@ -26,23 +26,23 @@ export class ModelProxy {
    *
    * @param messages - The conversation history to send to the model
    * @param options - Optional streaming configuration
-   * @param agentContext - The request to add the usage to, or `undefined` to add it nowhere
+   * @param invocationContext - The request to add the usage to, or `undefined` to add it nowhere
    * @returns Async generator mirroring {@link Model.streamAggregated}
    */
   async *streamAggregated(
     messages: Message[],
     options?: StreamOptions,
-    agentContext?: AgentContext
+    invocationContext?: InvocationContext
   ): AsyncGenerator<ModelStreamEvent | ContentBlock, StreamAggregatedResult, undefined> {
     const result = yield* this._model.streamAggregated(messages, options)
-    this._record(result, agentContext)
+    this._record(result, invocationContext)
     return result
   }
 
   /** Adds a completed call's reported usage to the request. */
-  private _record(result: StreamAggregatedResult, agentContext?: AgentContext): void {
+  private _record(result: StreamAggregatedResult, invocationContext?: InvocationContext): void {
     const usage = result?.metadata?.usage
-    const context = unwrapAgentContext(agentContext)
+    const context = unwrapInvocationContext(invocationContext)
     if (usage !== undefined && context !== undefined) {
       context.recordUsage(usage)
     }

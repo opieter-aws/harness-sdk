@@ -3,7 +3,7 @@ import { z } from 'zod'
 
 import { MockMessageModel } from '../../__fixtures__/mock-message-model.js'
 import { Agent } from '../../agent/agent.js'
-import type { AgentContext } from '../../agent/agent-context.js'
+import type { InvocationContext } from '../../agent/invocation-context.js'
 import { AfterToolCallEvent, BeforeModelCallEvent, BeforeToolCallEvent, InitializedEvent } from '../../hooks/events.js'
 import { Interrupt } from '../../interrupt.js'
 import { ExecuteToolStage, InvokeModelStage } from '../../middleware/index.js'
@@ -218,14 +218,14 @@ describe('BackgroundTasks', () => {
       },
     })
     let probeRan = false
-    let probeAgentContext: AgentContext | undefined
+    let probeInvocationContext: InvocationContext | undefined
     const probe = tool({
       name: 'probe',
       description: 'Record the request it runs under.',
       inputSchema: z.object({}),
       callback: (_input, context) => {
         probeRan = true
-        probeAgentContext = context?.agentContext
+        probeInvocationContext = context?.invocationContext
         return 'probed'
       },
     })
@@ -241,9 +241,9 @@ describe('BackgroundTasks', () => {
       backgroundTasks: { waitForCompletion: false, maxConcurrency: 1 },
       printer: false,
     })
-    let submittingAgentContext: AgentContext | undefined
+    let submittingInvocationContext: InvocationContext | undefined
     agent.addHook(BeforeModelCallEvent, (event) => {
-      submittingAgentContext ??= event?.agentContext
+      submittingInvocationContext ??= event?.invocationContext
     })
 
     await agent.invoke('Run both.')
@@ -251,8 +251,8 @@ describe('BackgroundTasks', () => {
 
     release()
     await expect.poll(() => probeRan).toBe(true)
-    expect(submittingAgentContext).toBeDefined()
-    expect(probeAgentContext).toBe(submittingAgentContext)
+    expect(submittingInvocationContext).toBeDefined()
+    expect(probeInvocationContext).toBe(submittingInvocationContext)
   })
 
   it('delivers work that finishes between invocations', async () => {

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { Agent } from '../../../agent/agent.js'
-import { createAgentContext } from '../../../agent/agent-context.js'
+import { createInvocationContext } from '../../../agent/invocation-context.js'
 import { BeforeToolCallEvent } from '../../../hooks/events.js'
 import { HookRegistryImplementation } from '../../../hooks/registry.js'
 import { MockMessageModel } from '../../../__fixtures__/mock-message-model.js'
@@ -120,21 +120,21 @@ describe('LLMSteeringHandler', () => {
       })
       const agent = new Agent({ model, interventions: [handler] })
       await agent.initialize()
-      const parentAgentContext = createAgentContext({ turns: 1 })
-      parentAgentContext.turns = 5
+      const parentInvocationContext = createInvocationContext({ turns: 1 })
+      parentInvocationContext.turns = 5
 
       const event = new BeforeToolCallEvent({
         agent,
         toolUse,
         tool: undefined,
         invocationState: {},
-        agentContext: parentAgentContext,
+        invocationContext: parentInvocationContext,
       })
       await getHookRegistry(agent).invokeCallbacks(event)
 
       expect(event.cancel).toBe('GUIDANCE: [strands:llm-steering-handler] narrow the query')
-      expect(parentAgentContext.usage).toEqual({ inputTokens: 30, outputTokens: 8, totalTokens: 38 })
-      expect(parentAgentContext.turns).toBe(5)
+      expect(parentInvocationContext.usage).toEqual({ inputTokens: 30, outputTokens: 8, totalTokens: 38 })
+      expect(parentInvocationContext.turns).toBe(5)
     })
   })
 })

@@ -194,7 +194,7 @@ export class AgentAsTool extends Tool {
   }
 
   async *stream(toolContext: ToolContext): ToolStreamGenerator {
-    const { toolUse, invocationState, cancelSignal, agentContext } = toolContext
+    const { toolUse, invocationState, cancelSignal, invocationContext } = toolContext
     const toolUseId = toolUse.toolUseId
 
     // Concurrency guard: loadSnapshot + agent.stream() must not overlap.
@@ -230,7 +230,7 @@ export class AgentAsTool extends Tool {
       const invokeOptions: InvokeOptions = {
         invocationState,
         cancelSignal,
-        ...(agentContext && { agentContext }),
+        ...(invocationContext && { invocationContext }),
       }
       const gen = this._agent.stream(input, invokeOptions)
       let next = await gen.next()

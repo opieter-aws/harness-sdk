@@ -1,7 +1,7 @@
 import { z } from 'zod'
 
 import { Agent } from '../../agent/agent.js'
-import { createAuxiliaryAgentContext } from '../../agent/agent-context.js'
+import { createAuxiliaryInvocationContext } from '../../agent/invocation-context.js'
 import type { InvokeOptions } from '../../types/agent.js'
 import { tool } from '../../tools/tool-factory.js'
 import { htmlToMarkdown } from './extract.js'
@@ -93,10 +93,10 @@ export function makeWebFetch(options: MakeWebFetchOptions = {}): ReturnType<type
       }
 
       const signal = context?.cancelSignal ?? null
-      const auxiliaryAgentContext = createAuxiliaryAgentContext(context?.agentContext)
+      const auxiliaryInvocationContext = createAuxiliaryInvocationContext(context?.invocationContext)
       const invokeOptions: InvokeOptions = {
         ...(context?.cancelSignal && { cancelSignal: context.cancelSignal }),
-        ...(auxiliaryAgentContext && { agentContext: auxiliaryAgentContext }),
+        ...(auxiliaryInvocationContext && { invocationContext: auxiliaryInvocationContext }),
       }
       const [contentType, raw] = await fetchOnce(url, maxBytes, signal)
 
