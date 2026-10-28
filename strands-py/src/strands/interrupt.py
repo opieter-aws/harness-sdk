@@ -76,8 +76,6 @@ class _InterruptState:
     activated: bool = False
     pending_tool_execution: PendingToolExecution | None = None
     _version: int = field(default=0, compare=False, repr=False)
-    _resumed_interrupt_ids: set[str] = field(default_factory=set, compare=False, repr=False)
-    """Interrupts answered through ``resume`` in this process; never serialized, so restored state cannot claim it."""
 
     def activate(self) -> None:
         """Activate the interrupt state."""
@@ -93,7 +91,6 @@ class _InterruptState:
         self.context = {}
         self.activated = False
         self.pending_tool_execution = None
-        self._resumed_interrupt_ids.clear()
         self._version += 1
 
     def end_tool_cycle(self) -> None:
@@ -103,7 +100,6 @@ class _InterruptState:
             for interrupt_id, interrupt in self.interrupts.items()
             if interrupt_id.startswith(_AGENT_STREAM_INTERRUPT_ID_PREFIX) and interrupt.response is not None
         }
-        self._resumed_interrupt_ids.intersection_update(self.interrupts)
         self.context = {}
         self.activated = False
         self.pending_tool_execution = None
@@ -120,7 +116,6 @@ class _InterruptState:
             return
 
         self.interrupts = remaining
-        self._resumed_interrupt_ids.intersection_update(self.interrupts)
         self._version += 1
 
     def resume(self, prompt: "AgentInput") -> None:
@@ -155,18 +150,9 @@ class _InterruptState:
                 raise KeyError(f"interrupt_id=<{interrupt_id}> | no interrupt found")
 
             self.interrupts[interrupt_id].response = interrupt_response
-            self._resumed_interrupt_ids.add(interrupt_id)
 
         self.context["responses"] = contents
         self._version += 1
-
-    @property
-    def resumed_interrupt_ids(self) -> frozenset[str]:
-        """Interrupt ids whose response was given through ``resume`` in this process.
-
-        A preemptive response replaces any other stored response, so only these outrank it.
-        """
-        return frozenset(self._resumed_interrupt_ids)
 
     def set_pending_tool_results(self, completed_tool_results: list["ToolResult"]) -> None:
         """Update completed results for a pending tool execution."""

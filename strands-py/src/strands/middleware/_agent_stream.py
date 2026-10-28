@@ -50,8 +50,6 @@ class AgentStreamContext:
     same pass, which ends by clearing the live interrupts; the snapshot keeps a gate's re-read
     after ``next_fn`` stable.
     """
-    _resumed_interrupt_ids: frozenset[str] = field(default=frozenset(), repr=False)
-    """Ids in ``_interrupts`` whose response was given through ``resume``, snapshotted alongside them."""
 
     def interrupt(self, name: str, *, reason: Any = None, response: Any = None) -> MiddlewareInterruptResult:
         """Request a human-in-the-loop interrupt.
@@ -80,14 +78,7 @@ class AgentStreamContext:
             RuntimeError: Raised by the run loop when this is called after the pass has already
                 produced its stop event, which resuming cannot replay.
         """
-        return _resolve_middleware_interrupt(
-            self._interrupts,
-            self._interrupt_id(name),
-            name,
-            reason,
-            response,
-            resumed_interrupt_ids=self._resumed_interrupt_ids,
-        )
+        return _resolve_middleware_interrupt(self._interrupts, self._interrupt_id(name), name, reason, response)
 
     def _interrupt_id(self, name: str) -> str:
         """Derive the interrupt id for ``name``, namespaced to the agent-stream stage.

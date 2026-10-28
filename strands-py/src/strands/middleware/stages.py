@@ -144,8 +144,6 @@ def _resolve_middleware_interrupt(
     name: str,
     reason: Any,
     response: Any,
-    *,
-    resumed_interrupt_ids: frozenset[str],
 ) -> MiddlewareInterruptResult:
     """Resolve a middleware-initiated interrupt without mutating interrupt state.
 
@@ -161,9 +159,7 @@ def _resolve_middleware_interrupt(
         interrupt_id: The deterministic id for this interrupt.
         name: User-defined name for the interrupt.
         reason: Optional reason surfaced to the user.
-        response: Optional preemptive response — wins over a prior response unless that response
-            was given when resuming from the interrupt.
-        resumed_interrupt_ids: Interrupt ids whose response was given when resuming in this process.
+        response: Optional preemptive response — fallback if no prior human response exists.
 
     Returns:
         The user's response wrapped in a ``MiddlewareInterruptResult``.
@@ -172,8 +168,7 @@ def _resolve_middleware_interrupt(
         InterruptException: When no response is available yet and none was provided.
     """
     existing = interrupts.get(interrupt_id)
-    preemptive_wins = response is not None and interrupt_id not in resumed_interrupt_ids
-    if existing is not None and existing.response is not None and not preemptive_wins:
+    if existing is not None and existing.response is not None:
         return MiddlewareInterruptResult(response=existing.response)
 
     if response is not None:
@@ -238,12 +233,7 @@ class ExecuteToolContext:
             InterruptException: When no response is available yet and none was provided.
         """
         return _resolve_middleware_interrupt(
-            self._interrupt_state.interrupts,
-            self._interrupt_id(name),
-            name,
-            reason,
-            response,
-            resumed_interrupt_ids=self._interrupt_state.resumed_interrupt_ids,
+            self._interrupt_state.interrupts, self._interrupt_id(name), name, reason, response
         )
 
     def _interrupt_id(self, name: str) -> str:

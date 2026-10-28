@@ -9,8 +9,7 @@ import type { MiddlewareInterruptResult } from './stages.js'
  * Creates a non-mutating interrupt function backed by the provided interrupt state.
  *
  * Existing responses are read from state, but new interrupts remain local until
- * the caller handles the thrown {@link InterruptError}. A preemptive response wins
- * over an existing one unless that one was given through {@link InterruptState.resume}.
+ * the caller handles the thrown {@link InterruptError}.
  *
  * @param interruptState - State used to resolve prior responses
  * @param idPrefix - Prefix used to construct the interrupt identifier
@@ -27,10 +26,9 @@ export function createMiddlewareInterrupt(
 ): <T = JSONValue>(params: InterruptParams) => MiddlewareInterruptResult<T> {
   return <T = JSONValue>(params: InterruptParams): MiddlewareInterruptResult<T> => {
     const interruptId = `${idPrefix}:${params.name}`
-    const storedResponse = (priorResponses ?? interruptState.interrupts)[interruptId]?.response
-    const preemptiveWins = params.response !== undefined && !interruptState.isAnsweredByResume(interruptId)
-    if (storedResponse !== undefined && !preemptiveWins) {
-      return { response: storedResponse as T }
+    const existing = (priorResponses ?? interruptState.interrupts)[interruptId]
+    if (existing?.response !== undefined) {
+      return { response: existing.response as T }
     }
     if (params.response !== undefined) {
       return { response: params.response as T }

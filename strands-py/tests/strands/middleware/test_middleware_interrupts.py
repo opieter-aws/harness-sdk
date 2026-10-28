@@ -432,7 +432,7 @@ def test_before_hook_fires_but_after_hook_skipped_on_interrupt(calculator_tool):
 
 
 def test_stored_human_response_takes_precedence_over_preemptive(calculator_tool):
-    """A human response given through resume must win over a middleware's preemptive response=.
+    """A stored human response must win over a middleware's preemptive response=.
 
     Guards against accidentally swapping the two checks in _resolve_middleware_interrupt,
     which would let a middleware default silently override a human decision.
@@ -440,33 +440,9 @@ def test_stored_human_response_takes_precedence_over_preemptive(calculator_tool)
     interrupt_id = "v1:middleware_execute_tool:tool_1:test-gate"
     interrupts = {interrupt_id: Interrupt(id=interrupt_id, name="gate", response="DENIED")}
 
-    result = _resolve_middleware_interrupt(
-        interrupts, interrupt_id, "gate", None, "auto-approve", resumed_interrupt_ids=frozenset({interrupt_id})
-    )
+    result = _resolve_middleware_interrupt(interrupts, interrupt_id, "gate", None, "auto-approve")
 
     assert result == MiddlewareInterruptResult(response="DENIED")
-
-
-def test_preemptive_response_takes_precedence_over_response_not_given_through_resume():
-    interrupt_id = "v1:middleware_execute_tool:tool_1:test-gate"
-    interrupts = {interrupt_id: Interrupt(id=interrupt_id, name="gate", response="APPROVED")}
-
-    result = _resolve_middleware_interrupt(
-        interrupts, interrupt_id, "gate", None, "DENIED", resumed_interrupt_ids=frozenset()
-    )
-
-    assert result == MiddlewareInterruptResult(response="DENIED")
-
-
-def test_stored_response_used_without_preemptive_response():
-    interrupt_id = "v1:middleware_execute_tool:tool_1:test-gate"
-    interrupts = {interrupt_id: Interrupt(id=interrupt_id, name="gate", response="APPROVED")}
-
-    result = _resolve_middleware_interrupt(
-        interrupts, interrupt_id, "gate", None, None, resumed_interrupt_ids=frozenset()
-    )
-
-    assert result == MiddlewareInterruptResult(response="APPROVED")
 
 
 # --- AgentStreamContext interrupt coverage ---

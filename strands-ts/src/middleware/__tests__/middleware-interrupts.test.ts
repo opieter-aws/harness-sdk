@@ -7,51 +7,6 @@ import { ExecuteToolStage, AgentStreamStage } from '../stages.js'
 import { TextBlock, ToolResultBlock } from '../../types/messages.js'
 import { InterruptResponseContent } from '../../types/interrupt.js'
 import { AfterInvocationEvent, InterruptEvent } from '../../hooks/events.js'
-import { Interrupt, InterruptState } from '../../interrupt.js'
-import { createMiddlewareInterrupt } from '../interrupt.js'
-
-describe('createMiddlewareInterrupt', () => {
-  const interruptId = 'middleware:executeTool:tool-1:check'
-
-  function stateWithStoredResponse(response: string): InterruptState {
-    const state = new InterruptState()
-    state.interrupts[interruptId] = new Interrupt({ id: interruptId, name: 'check', response, source: 'middleware' })
-    return state
-  }
-
-  it('uses a live response over a stored response', () => {
-    const interrupt = createMiddlewareInterrupt(stateWithStoredResponse('stored'), 'middleware:executeTool:tool-1')
-
-    expect(interrupt({ name: 'check', response: 'live' })).toStrictEqual({ response: 'live' })
-  })
-
-  it('uses a stored response when no live response is supplied', () => {
-    const interrupt = createMiddlewareInterrupt(stateWithStoredResponse('stored'), 'middleware:executeTool:tool-1')
-
-    expect(interrupt({ name: 'check' })).toStrictEqual({ response: 'stored' })
-  })
-
-  it('keeps a response given through resume over a live response', () => {
-    const state = new InterruptState()
-    state.registerInterrupt(new Interrupt({ id: interruptId, name: 'check', source: 'middleware' }))
-    state.activate()
-    state.resume([new InterruptResponseContent({ interruptId, response: 'resumed' })])
-    const interrupt = createMiddlewareInterrupt(state, 'middleware:executeTool:tool-1')
-
-    expect(interrupt({ name: 'check', response: 'live' })).toStrictEqual({ response: 'resumed' })
-  })
-
-  it('keeps a resumed response read from a snapshot taken before deactivation', () => {
-    const state = new InterruptState()
-    state.registerInterrupt(new Interrupt({ id: interruptId, name: 'check', source: 'middleware' }))
-    state.activate()
-    state.resume([new InterruptResponseContent({ interruptId, response: 'resumed' })])
-    const interrupt = createMiddlewareInterrupt(state, 'middleware:executeTool:tool-1', { ...state.interrupts })
-    state.deactivate()
-
-    expect(interrupt({ name: 'check', response: 'live' })).toStrictEqual({ response: 'resumed' })
-  })
-})
 
 describe('Middleware interrupts', () => {
   describe('ExecuteToolStage', () => {

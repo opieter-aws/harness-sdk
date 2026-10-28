@@ -224,8 +224,8 @@ class HumanInTheLoop(InterventionHandler):
             **kwargs: Additional keyword arguments for future extensibility.
 
         Returns:
-            Proceed if the tool is allow-listed, trusted, or approved inline;
-            otherwise a Confirm action (pausing via interrupt when no ``ask`` is set).
+            Proceed if the tool is allow-listed, trusted, or approved inline; Deny if the inline
+            answer rejects it; otherwise a Confirm action that pauses via interrupt.
         """
         tool_name = event.tool_use["name"]
         classifier_result = await self._requires_approval(event)
@@ -252,8 +252,7 @@ class HumanInTheLoop(InterventionHandler):
             return Confirm(prompt=prompt, evaluate=evaluate)
 
         # Inline mode: collect the response now (awaiting async ``ask`` callbacks). A
-        # trust response short-circuits to Proceed; anything else is handed to the
-        # standard evaluator via Confirm so the normal approve/deny path applies.
+        # trust response short-circuits to Proceed; anything else is evaluated directly.
         response = self._ask(prompt)
         if inspect.isawaitable(response):
             response = await response
@@ -270,7 +269,22 @@ class HumanInTheLoop(InterventionHandler):
             self._trust_tool(event, tool_name)
             return Proceed()
 
-        return Confirm(prompt=prompt, response=response, evaluate=self._evaluate)
+        return self._decide_ask_response(tool_name, prompt, response)
+
+    def _decide_ask_response(self, tool_name: str, prompt: str, response: Any) -> InterventionAction:
+        """Decide on the answer the human just gave, without consulting stored interrupt responses.
+
+        Args:
+            tool_name: Name of the tool awaiting approval.
+            prompt: The approval prompt shown to the human.
+            response: The human's answer from the inline ``ask`` callback.
+
+        Returns:
+            Proceed if the answer approves the call, otherwise Deny.
+        """
+        if self._evaluate(response):
+            return Proceed()
+        return Deny(reason=f'Tool "{tool_name}" denied: {prompt}')
 
     async def _requires_approval(self, event: BeforeToolCallEvent) -> ClassifierResult:
         """Decide whether the tool call needs human approval.

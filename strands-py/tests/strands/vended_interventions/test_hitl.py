@@ -1,7 +1,6 @@
 """Tests for the HumanInTheLoop vended intervention handler."""
 
 import logging
-import uuid
 from collections.abc import AsyncGenerator
 from typing import Any
 from unittest.mock import MagicMock
@@ -613,10 +612,20 @@ class TestTrustMode:
 
 class TestRestoredInterruptResponses:
     @staticmethod
-    def _restore_interrupt_response(agent: Agent, tool_use_id: str, response: str) -> None:
-        interrupt_id = (
-            f"v1:before_tool_call:{tool_use_id}:{uuid.uuid5(uuid.NAMESPACE_OID, 'strands:human-in-the-loop')}"
-        )
+    def _interrupt_id_for_tool_call() -> str:
+        """Raise a real interrupt for the ``tool-1`` call so the restored entry uses the id the SDK assigns."""
+
+        @tool(name="my_tool")
+        def my_tool() -> str:
+            return "executed"
+
+        model = MockedModelProvider([tool_use_message("my_tool", "tool-1"), text_message("Done")])
+        agent = Agent(model=model, tools=[my_tool], interventions=[HumanInTheLoop()])
+        return agent("Run tool").interrupts[0].id
+
+    @classmethod
+    def _restore_interrupt_response(cls, agent: Agent, response: str) -> None:
+        interrupt_id = cls._interrupt_id_for_tool_call()
         agent.load_snapshot(
             Snapshot(
                 scope="agent",
@@ -654,7 +663,7 @@ class TestRestoredInterruptResponses:
 
         model = MockedModelProvider([tool_use_message("my_tool", "tool-1"), text_message("Done")])
         agent = Agent(model=model, tools=[my_tool], interventions=[HumanInTheLoop(ask=ask)])
-        self._restore_interrupt_response(agent, "tool-1", "y")
+        self._restore_interrupt_response(agent, "y")
 
         agent("Run tool")
 
@@ -671,7 +680,7 @@ class TestRestoredInterruptResponses:
 
         model = MockedModelProvider([tool_use_message("my_tool", "tool-1"), text_message("Done")])
         agent = Agent(model=model, tools=[my_tool], interventions=[HumanInTheLoop()])
-        self._restore_interrupt_response(agent, "tool-1", "y")
+        self._restore_interrupt_response(agent, "y")
 
         result = agent("Run tool")
 

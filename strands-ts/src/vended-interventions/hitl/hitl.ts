@@ -1,5 +1,5 @@
 import { InterventionHandler } from '../../interventions/handler.js'
-import { confirm, proceed, defaultEvaluate } from '../../interventions/actions.js'
+import { confirm, deny, proceed, defaultEvaluate } from '../../interventions/actions.js'
 import { logger } from '../../logging/logger.js'
 import { createDecisionModelRiskClassifier, createLlmRiskClassifier } from './classifier.js'
 import type {
@@ -225,10 +225,16 @@ export class HumanInTheLoop extends InterventionHandler {
       return proceed()
     }
 
-    return confirm(prompt, {
-      response,
-      evaluate: this._evaluate ?? defaultEvaluate,
-    })
+    return this._decideAskResponse(toolName, prompt, response)
+  }
+
+  /** Decides on the answer the human just gave, without consulting stored interrupt responses. */
+  private _decideAskResponse(toolName: string, prompt: string, response: JSONValue): InterventionAction {
+    const evaluateResponse = this._evaluate ?? defaultEvaluate
+    if (response === undefined) {
+      return confirm(prompt, { evaluate: evaluateResponse })
+    }
+    return evaluateResponse(response) ? proceed() : deny(`Tool "${toolName}" denied: ${prompt}`)
   }
 
   /**

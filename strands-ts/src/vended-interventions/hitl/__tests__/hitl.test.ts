@@ -9,6 +9,7 @@ import { createMockTool } from '../../../__fixtures__/tool-helpers.js'
 import { InvocationContextImpl } from '../../../agent/invocation-context.js'
 import { BeforeToolCallEvent } from '../../../hooks/events.js'
 import { SNAPSHOT_SCHEMA_VERSION } from '../../../types/snapshot.js'
+import { InterruptResponseContent } from '../../../types/interrupt.js'
 import type { DecisionInput, DecisionResult, Question } from '../../../decisions/types.js'
 
 class StubDecisionModel extends DecisionModel {
@@ -543,9 +544,55 @@ describe('HumanInTheLoop', () => {
     })
   })
 
+  describe('ask callback without an answer', () => {
+    it('pauses and applies the resume answer', async () => {
+      let toolExecuted = false
+
+      const model = new MockMessageModel()
+        .addTurn({ type: 'toolUseBlock', name: 'myTool', toolUseId: 'tool-1', input: {} })
+        .addTurn({ type: 'textBlock', text: 'Done' })
+
+      const tool = createMockTool('myTool', () => {
+        toolExecuted = true
+        return 'executed'
+      })
+
+      const agent = new Agent({
+        model,
+        tools: [tool],
+        interventions: [new HumanInTheLoop({ ask: async () => undefined as unknown as string })],
+        printer: false,
+      })
+
+      const interrupted = await agent.invoke('Run tool')
+      expect(interrupted.stopReason).toBe('interrupt')
+
+      const result = await agent.invoke([
+        new InterruptResponseContent({ interruptId: interrupted.interrupts![0]!.id, response: 'y' }),
+      ])
+      expect(result.stopReason).toBe('endTurn')
+      expect(toolExecuted).toBe(true)
+    })
+  })
+
   describe('restored interrupt responses', () => {
-    function restoreInterruptResponse(agent: Agent, toolUseId: string, response: string): void {
-      const interruptId = `hook:beforeToolCall:${toolUseId}:strands:human-in-the-loop`
+    /** Raises a real interrupt for the `tool-1` call so the restored entry uses the id the SDK assigns. */
+    async function interruptIdForToolCall(): Promise<string> {
+      const model = new MockMessageModel()
+        .addTurn({ type: 'toolUseBlock', name: 'myTool', toolUseId: 'tool-1', input: {} })
+        .addTurn({ type: 'textBlock', text: 'Done' })
+      const agent = new Agent({
+        model,
+        tools: [createMockTool('myTool', () => 'executed')],
+        interventions: [new HumanInTheLoop()],
+        printer: false,
+      })
+      const result = await agent.invoke('Run tool')
+      return result.interrupts![0]!.id
+    }
+
+    async function restoreInterruptResponse(agent: Agent, response: string): Promise<void> {
+      const interruptId = await interruptIdForToolCall()
       agent.loadSnapshot({
         scope: 'agent',
         schemaVersion: SNAPSHOT_SCHEMA_VERSION,
@@ -588,7 +635,7 @@ describe('HumanInTheLoop', () => {
         ],
         printer: false,
       })
-      restoreInterruptResponse(agent, 'tool-1', 'y')
+      await restoreInterruptResponse(agent, 'y')
 
       await agent.invoke('Run tool')
       expect(askCount).toBe(1)
@@ -613,7 +660,7 @@ describe('HumanInTheLoop', () => {
         interventions: [new HumanInTheLoop()],
         printer: false,
       })
-      restoreInterruptResponse(agent, 'tool-1', 'y')
+      await restoreInterruptResponse(agent, 'y')
 
       const result = await agent.invoke('Run tool')
       expect(result.stopReason).toBe('endTurn')
