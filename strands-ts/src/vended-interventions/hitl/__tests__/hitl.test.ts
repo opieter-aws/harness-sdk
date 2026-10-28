@@ -8,6 +8,7 @@ import { MockMessageModel } from '../../../__fixtures__/mock-message-model.js'
 import { createMockTool } from '../../../__fixtures__/tool-helpers.js'
 import { InvocationContextImpl } from '../../../agent/invocation-context.js'
 import { BeforeToolCallEvent } from '../../../hooks/events.js'
+import { SNAPSHOT_SCHEMA_VERSION } from '../../../types/snapshot.js'
 import type { DecisionInput, DecisionResult, Question } from '../../../decisions/types.js'
 
 class StubDecisionModel extends DecisionModel {
@@ -450,6 +451,173 @@ describe('HumanInTheLoop', () => {
       await agent.invoke('Run danger twice')
       expect(askCount).toBe(2)
       expect(toolExecuted).toBe(false)
+    })
+
+    it('ignores trusted tools in agent state when enableTrust is false', async () => {
+      let askCount = 0
+      let toolExecuted = false
+
+      const model = new MockMessageModel()
+        .addTurn({ type: 'toolUseBlock', name: 'myTool', toolUseId: 'tool-1', input: {} })
+        .addTurn({ type: 'textBlock', text: 'Done' })
+
+      const tool = createMockTool('myTool', () => {
+        toolExecuted = true
+        return 'executed'
+      })
+
+      const agent = new Agent({
+        model,
+        tools: [tool],
+        appState: { 'hitl:trustedTools': ['myTool'] },
+        interventions: [
+          new HumanInTheLoop({
+            ask: async () => {
+              askCount++
+              return 'n'
+            },
+          }),
+        ],
+        printer: false,
+      })
+
+      await agent.invoke('Run tool')
+      expect(askCount).toBe(1)
+      expect(toolExecuted).toBe(false)
+    })
+
+    it.each([
+      ['a string', 'myTool'],
+      ['a number', 42],
+      ['an object', { myTool: true }],
+      ['a list with non-string entries', ['myTool', 1]],
+    ])('ignores a trusted tools value that is %s', async (_label, trustedTools) => {
+      let askCount = 0
+      let toolExecuted = false
+
+      const model = new MockMessageModel()
+        .addTurn({ type: 'toolUseBlock', name: 'myTool', toolUseId: 'tool-1', input: {} })
+        .addTurn({ type: 'textBlock', text: 'Done' })
+
+      const tool = createMockTool('myTool', () => {
+        toolExecuted = true
+        return 'executed'
+      })
+
+      const agent = new Agent({
+        model,
+        tools: [tool],
+        appState: { 'hitl:trustedTools': trustedTools },
+        interventions: [
+          new HumanInTheLoop({
+            enableTrust: true,
+            ask: async () => {
+              askCount++
+              return 'n'
+            },
+          }),
+        ],
+        printer: false,
+      })
+
+      await agent.invoke('Run tool')
+      expect(askCount).toBe(1)
+      expect(toolExecuted).toBe(false)
+    })
+
+    it('replaces a malformed trusted tools value when a tool is trusted', async () => {
+      const model = new MockMessageModel()
+        .addTurn({ type: 'toolUseBlock', name: 'myTool', toolUseId: 'tool-1', input: {} })
+        .addTurn({ type: 'textBlock', text: 'Done' })
+
+      const agent = new Agent({
+        model,
+        tools: [createMockTool('myTool', () => 'executed')],
+        appState: { 'hitl:trustedTools': { myTool: true } },
+        interventions: [new HumanInTheLoop({ enableTrust: true, ask: async () => 't' })],
+        printer: false,
+      })
+
+      await agent.invoke('Run tool')
+      expect(agent.appState.get('hitl:trustedTools')).toStrictEqual(['myTool'])
+    })
+  })
+
+  describe('restored interrupt responses', () => {
+    function restoreInterruptResponse(agent: Agent, toolUseId: string, response: string): void {
+      const interruptId = `hook:beforeToolCall:${toolUseId}:strands:human-in-the-loop`
+      agent.loadSnapshot({
+        scope: 'agent',
+        schemaVersion: SNAPSHOT_SCHEMA_VERSION,
+        createdAt: new Date().toISOString(),
+        data: {
+          interrupts: {
+            interrupts: {
+              [interruptId]: { id: interruptId, name: 'strands:human-in-the-loop', response, source: 'hook' },
+            },
+            activated: false,
+          },
+        },
+        appData: {},
+      })
+    }
+
+    it('uses the live ask answer over a restored answer', async () => {
+      let askCount = 0
+      let toolExecuted = false
+
+      const model = new MockMessageModel()
+        .addTurn({ type: 'toolUseBlock', name: 'myTool', toolUseId: 'tool-1', input: {} })
+        .addTurn({ type: 'textBlock', text: 'Done' })
+
+      const tool = createMockTool('myTool', () => {
+        toolExecuted = true
+        return 'executed'
+      })
+
+      const agent = new Agent({
+        model,
+        tools: [tool],
+        interventions: [
+          new HumanInTheLoop({
+            ask: async () => {
+              askCount++
+              return 'n'
+            },
+          }),
+        ],
+        printer: false,
+      })
+      restoreInterruptResponse(agent, 'tool-1', 'y')
+
+      await agent.invoke('Run tool')
+      expect(askCount).toBe(1)
+      expect(toolExecuted).toBe(false)
+    })
+
+    it('applies a restored answer when no ask callback is configured', async () => {
+      let toolExecuted = false
+
+      const model = new MockMessageModel()
+        .addTurn({ type: 'toolUseBlock', name: 'myTool', toolUseId: 'tool-1', input: {} })
+        .addTurn({ type: 'textBlock', text: 'Done' })
+
+      const tool = createMockTool('myTool', () => {
+        toolExecuted = true
+        return 'executed'
+      })
+
+      const agent = new Agent({
+        model,
+        tools: [tool],
+        interventions: [new HumanInTheLoop()],
+        printer: false,
+      })
+      restoreInterruptResponse(agent, 'tool-1', 'y')
+
+      const result = await agent.invoke('Run tool')
+      expect(result.stopReason).toBe('endTurn')
+      expect(toolExecuted).toBe(true)
     })
   })
 

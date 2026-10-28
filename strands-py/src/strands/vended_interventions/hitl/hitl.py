@@ -278,7 +278,8 @@ class HumanInTheLoop(InterventionHandler):
         Precedence (first match wins):
 
         1. Negated (``!tool``) -> always requires approval (cannot be trusted)
-        2. Trusted at runtime via trust response (stored in ``agent.state``) -> runs freely
+        2. Trusted at runtime via trust response (stored in ``agent.state``, only read when
+           ``enable_trust``) -> runs freely
         3. Wildcard (``*``) -> runs freely
         4. Explicitly listed -> runs freely
         5. Classifier (if provided) -> its decision
@@ -293,8 +294,7 @@ class HumanInTheLoop(InterventionHandler):
         tool_name = event.tool_use["name"]
         if f"!{tool_name}" in self._allowed_tools:
             return ClassifierResult(requires_human_in_the_loop=True)
-        trusted = event.agent.state.get(_TRUSTED_TOOLS_KEY) or []
-        if tool_name in trusted:
+        if self._enable_trust and tool_name in self._trusted_tools(event):
             return ClassifierResult(requires_human_in_the_loop=False)
         if "*" in self._allowed_tools:
             return ClassifierResult(requires_human_in_the_loop=False)
@@ -343,9 +343,26 @@ class HumanInTheLoop(InterventionHandler):
             event: The tool call event (provides access to the agent).
             tool_name: Name of the tool to trust.
         """
-        trusted = event.agent.state.get(_TRUSTED_TOOLS_KEY) or []
+        trusted = self._trusted_tools(event)
         if tool_name not in trusted:
             event.agent.state.set(_TRUSTED_TOOLS_KEY, [*trusted, tool_name])
+
+    @staticmethod
+    def _trusted_tools(event: BeforeToolCallEvent) -> list[str]:
+        """Read the trusted tool names from agent state.
+
+        Agent state can be restored from a session, so anything other than a list of strings counts as empty.
+
+        Args:
+            event: The tool call event (provides access to the agent).
+
+        Returns:
+            The trusted tool names.
+        """
+        trusted = event.agent.state.get(_TRUSTED_TOOLS_KEY)
+        if isinstance(trusted, list) and all(isinstance(tool_name, str) for tool_name in trusted):
+            return trusted
+        return []
 
     @staticmethod
     def _is_trust_response(response: Any) -> bool:

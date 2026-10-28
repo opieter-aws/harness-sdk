@@ -188,6 +188,12 @@ export class InterruptState implements InterruptStateData {
   /** Additional state carried for the duration of an interrupt, e.g. an interrupted sub-agent turn. */
   context: Record<string, JSONValue>
 
+  /**
+   * IDs whose current interrupt was answered through {@link resume} in this process. Never serialized, so
+   * restored state cannot claim it, and kept across {@link deactivate} so a pre-deactivation snapshot still resolves.
+   */
+  private readonly _resumedInterruptIds = new Set<string>()
+
   constructor() {
     this.interrupts = {}
     this.resumeResponses = undefined
@@ -295,16 +301,30 @@ export class InterruptState implements InterruptStateData {
       }
 
       interrupt.response = response
+      this._resumedInterruptIds.add(interruptId)
     }
 
     this.resumeResponses = responses
   }
 
   /**
+   * Whether an interrupt was answered through {@link resume} in this process.
+   *
+   * @param id - Interrupt identifier
+   * @returns True when the interrupt's response came from {@link resume}
+   *
+   * @internal
+   */
+  isAnsweredByResume(id: string): boolean {
+    return this._resumedInterruptIds.has(id)
+  }
+
+  /**
    * Gets or creates an interrupt with the given ID.
    * If the interrupt already exists, returns it (potentially with a response).
-   * If a preemptive response is provided and the interrupt is new, the response
-   * is stored on the interrupt so it returns immediately without halting execution.
+   * A preemptive response is stored on the interrupt so it returns immediately without
+   * halting execution. It replaces an existing response unless that response was given
+   * through {@link resume}.
    *
    * @param id - Unique identifier for the interrupt
    * @param name - User-defined name for the interrupt
@@ -322,6 +342,9 @@ export class InterruptState implements InterruptStateData {
   ): Interrupt {
     const existing = this.interrupts[id]
     if (existing) {
+      if (response !== undefined && !this.isAnsweredByResume(id)) {
+        existing.response = response
+      }
       return existing
     }
 
@@ -333,6 +356,7 @@ export class InterruptState implements InterruptStateData {
       ...(source !== undefined && { source }),
     })
     this.interrupts[id] = interrupt
+    this._resumedInterruptIds.delete(id)
     return interrupt
   }
 

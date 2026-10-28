@@ -85,7 +85,8 @@ class _Interruptible(Protocol):
         Args: name: User defined name for the interrupt.
                 Must be unique across hook callbacks.
             reason: User provided reason for the interrupt.
-            response: Preemptive response from user if available.
+            response: Preemptive response from user if available. Replaces a stored response unless
+                that response was given when resuming from the interrupt.
 
         Returns:
             The response from a human user when resuming from an interrupt state.
@@ -105,6 +106,8 @@ class _Interruptible(Protocol):
         state = agent._interrupt_state
 
         interrupt_ = state.interrupts.setdefault(id, Interrupt(id, name, reason, response))
+        if response is not None and id not in state.resumed_interrupt_ids:
+            interrupt_.response = response
         if interrupt_.response is not None:
             return interrupt_.response
 

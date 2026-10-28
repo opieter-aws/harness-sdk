@@ -1757,6 +1757,9 @@ class Agent(AgentBase, LocalAgent):
                     # survives the tool cycle clearing the live dict. Empty when not activated,
                     # so a dead cycle's retained response cannot resolve a fresh gate.
                     _interrupts=dict(self._interrupt_state.interrupts) if self._interrupt_state.activated else {},
+                    _resumed_interrupt_ids=(
+                        self._interrupt_state.resumed_interrupt_ids if self._interrupt_state.activated else frozenset()
+                    ),
                 )
                 try:
                     async for event in self._middleware_registry.invoke(

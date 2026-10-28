@@ -234,7 +234,7 @@ export class HumanInTheLoop extends InterventionHandler {
   /**
    * Precedence (first match wins):
    * 1. Negated (`!tool`) → always requires approval (cannot be trusted)
-   * 2. Trusted at runtime via 't' response (stored in agent.appState) → runs freely
+   * 2. Trusted at runtime via 't' response (stored in agent.appState, only read when enableTrust) → runs freely
    * 3. Wildcard (`*`) → runs freely
    * 4. Explicitly listed in allowedTools → runs freely
    * 5. Classifier (if provided) → its decision
@@ -247,8 +247,7 @@ export class HumanInTheLoop extends InterventionHandler {
       return { requiresHumanInTheLoop: true }
     }
 
-    const trusted = (event.agent.appState.get(TRUSTED_TOOLS_KEY) as string[] | undefined) ?? []
-    if (trusted.includes(toolName)) {
+    if (this._enableTrust && this._trustedTools(event).includes(toolName)) {
       return { requiresHumanInTheLoop: false }
     }
 
@@ -279,10 +278,19 @@ export class HumanInTheLoop extends InterventionHandler {
   }
 
   private _trustTool(event: BeforeToolCallEvent, toolName: string): void {
-    const trusted = (event.agent.appState.get(TRUSTED_TOOLS_KEY) as string[] | undefined) ?? []
+    const trusted = this._trustedTools(event)
     if (!trusted.includes(toolName)) {
       event.agent.appState.set(TRUSTED_TOOLS_KEY, [...trusted, toolName])
     }
+  }
+
+  /** Agent state can be restored from a session, so anything other than a list of strings counts as empty. */
+  private _trustedTools(event: BeforeToolCallEvent): string[] {
+    const trusted = event.agent.appState.get(TRUSTED_TOOLS_KEY)
+    if (Array.isArray(trusted) && trusted.every((toolName): toolName is string => typeof toolName === 'string')) {
+      return trusted
+    }
+    return []
   }
 
   private _resolveClassifier(

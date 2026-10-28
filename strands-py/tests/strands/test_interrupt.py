@@ -431,3 +431,59 @@ def test_interrupt_state_from_dict_drops_retained_invocation_scoped_responses():
 
     data["activated"] = True
     assert set(_InterruptState.from_dict(data).interrupts) == {retained.id}
+
+
+def _resume_response(interrupt_id, response):
+    return [{"interruptResponse": {"interruptId": interrupt_id, "response": response}}]
+
+
+def test_interrupt_state_resume_records_resumed_interrupt_ids():
+    interrupt_state = _InterruptState(
+        interrupts={"test_id": Interrupt(id="test_id", name="test_name")},
+        activated=True,
+    )
+
+    interrupt_state.resume(_resume_response("test_id", "yes"))
+
+    assert interrupt_state.resumed_interrupt_ids == frozenset({"test_id"})
+
+
+def test_interrupt_state_resumed_interrupt_ids_not_restored_from_dict():
+    interrupt_state = _InterruptState(
+        interrupts={"test_id": Interrupt(id="test_id", name="test_name")},
+        activated=True,
+    )
+    interrupt_state.resume(_resume_response("test_id", "yes"))
+
+    restored = _InterruptState.from_dict(interrupt_state.to_dict())
+
+    assert restored.resumed_interrupt_ids == frozenset()
+
+
+def test_interrupt_state_deactivate_clears_resumed_interrupt_ids():
+    interrupt_state = _InterruptState(
+        interrupts={"test_id": Interrupt(id="test_id", name="test_name")},
+        activated=True,
+    )
+    interrupt_state.resume(_resume_response("test_id", "yes"))
+
+    interrupt_state.deactivate()
+
+    assert interrupt_state.resumed_interrupt_ids == frozenset()
+
+
+def test_interrupt_state_end_tool_cycle_keeps_resumed_ids_of_retained_interrupts():
+    gate_id = f"{_AGENT_STREAM_INTERRUPT_ID_PREFIX}gate"
+    tool_id = "v1:tool_call:t1:abc"
+    interrupt_state = _InterruptState(
+        interrupts={
+            gate_id: Interrupt(id=gate_id, name="gate"),
+            tool_id: Interrupt(id=tool_id, name="tool_gate"),
+        },
+        activated=True,
+    )
+    interrupt_state.resume(_resume_response(gate_id, "yes") + _resume_response(tool_id, "yes"))
+
+    interrupt_state.end_tool_cycle()
+
+    assert interrupt_state.resumed_interrupt_ids == frozenset({gate_id})

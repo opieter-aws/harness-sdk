@@ -92,3 +92,43 @@ def test_interrupt_hook_event_interrupt_missing_agent():
     event = Event()
     with pytest.raises(RuntimeError, match="agent instance attribute not set"):
         event.interrupt("test_name")
+
+
+def test_interrupt_hook_event_interrupt_live_response_over_stored_response(agent, interrupt_hook_event):
+    interrupt_id = "test_id:test_name"
+    agent._interrupt_state.interrupts[interrupt_id] = Interrupt(id=interrupt_id, name="test_name", response="stored")
+
+    tru_response = interrupt_hook_event.interrupt("test_name", response="live")
+
+    assert tru_response == "live"
+    assert agent._interrupt_state.interrupts[interrupt_id].response == "live"
+
+
+def test_interrupt_hook_event_interrupt_live_response_over_restored_response(agent, interrupt_hook_event):
+    interrupt_id = "test_id:test_name"
+    agent._interrupt_state = _InterruptState.from_dict(
+        {
+            "interrupts": {
+                interrupt_id: {"id": interrupt_id, "name": "test_name", "reason": None, "response": "restored"}
+            },
+            "context": {"responses": [{"interruptResponse": {"interruptId": interrupt_id, "response": "restored"}}]},
+            "activated": True,
+        }
+    )
+
+    tru_response = interrupt_hook_event.interrupt("test_name", response="live")
+
+    assert tru_response == "live"
+
+
+def test_interrupt_hook_event_interrupt_resume_response_over_live_response(agent, interrupt_hook_event):
+    interrupt_id = "test_id:test_name"
+    agent._interrupt_state = _InterruptState(
+        interrupts={interrupt_id: Interrupt(id=interrupt_id, name="test_name")},
+        activated=True,
+    )
+    agent._interrupt_state.resume([{"interruptResponse": {"interruptId": interrupt_id, "response": "resumed"}}])
+
+    tru_response = interrupt_hook_event.interrupt("test_name", response="live")
+
+    assert tru_response == "resumed"

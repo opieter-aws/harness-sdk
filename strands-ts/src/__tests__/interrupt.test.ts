@@ -146,21 +146,57 @@ describe('InterruptState', () => {
       })
     })
 
-    it('ignores preemptive response when interrupt already exists', () => {
+    it('uses a live response over a stored response for an existing interrupt', () => {
       const state = new InterruptState()
       const first = state.getOrCreateInterrupt('int-1', 'confirm', 'reason')
-      first.response = 'user response'
+      first.response = 'stored response'
 
-      const second = state.getOrCreateInterrupt('int-1', 'confirm', 'reason', 'preemptive')
+      const second = state.getOrCreateInterrupt('int-1', 'confirm', 'reason', 'live response')
 
       expect(second).toBe(first)
       expect(second).toEqual({
         id: 'int-1',
         name: 'confirm',
         reason: 'reason',
-        response: 'user response',
+        response: 'live response',
         source: 'hook',
       })
+    })
+
+    it('uses a live response over a response restored from serialized state', () => {
+      const state = InterruptState.fromJSON({
+        interrupts: { 'int-1': { id: 'int-1', name: 'confirm', response: 'restored response' } },
+        resumeResponses: [{ interruptResponse: { interruptId: 'int-1', response: 'restored response' } }],
+        activated: true,
+      })
+
+      const interrupt = state.getOrCreateInterrupt('int-1', 'confirm', 'reason', 'live response')
+
+      expect(interrupt.response).toBe('live response')
+    })
+
+    it('keeps a response given through resume over a live response', () => {
+      const state = new InterruptState()
+      state.getOrCreateInterrupt('int-1', 'confirm', 'reason')
+      state.activate()
+      state.resume([new InterruptResponseContent({ interruptId: 'int-1', response: 'resume response' })])
+
+      const interrupt = state.getOrCreateInterrupt('int-1', 'confirm', 'reason', 'live response')
+
+      expect(interrupt.response).toBe('resume response')
+    })
+
+    it('uses a live response again after the resumed interrupt state is deactivated', () => {
+      const state = new InterruptState()
+      state.getOrCreateInterrupt('int-1', 'confirm', 'reason')
+      state.activate()
+      state.resume([new InterruptResponseContent({ interruptId: 'int-1', response: 'resume response' })])
+      state.deactivate()
+      state.getOrCreateInterrupt('int-1', 'confirm', 'reason', 'first live response')
+
+      const interrupt = state.getOrCreateInterrupt('int-1', 'confirm', 'reason', 'second live response')
+
+      expect(interrupt.response).toBe('second live response')
     })
   })
 
@@ -396,7 +432,8 @@ describe('interruptFromAgent', () => {
   it('returns resume response over preemptive response for existing interrupt', () => {
     const state = new InterruptState()
     state.getOrCreateInterrupt('test-id', 'confirm', 'need approval')
-    state.interrupts['test-id']!.response = 'user-provided'
+    state.activate()
+    state.resume([new InterruptResponseContent({ interruptId: 'test-id', response: 'user-provided' })])
 
     const agent = createMockAgent(state)
 
