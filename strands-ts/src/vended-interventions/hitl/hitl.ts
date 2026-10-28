@@ -113,6 +113,7 @@ export interface HumanInTheLoopConfig {
    * - **Default** (omitted): uses interrupt/resume — agent pauses, caller resumes with response.
    * - **`'stdio'`**: prompts via CLI readline (Node.js only). Agent blocks inline until human responds.
    * - **Custom function**: your own async prompt logic (Slack, web UI, etc.). Agent blocks inline.
+   *   Returning `undefined` denies the call.
    */
   ask?: ((prompt: string) => Promise<JSONValue>) | 'stdio'
 }
@@ -220,21 +221,23 @@ export class HumanInTheLoop extends InterventionHandler {
 
     const response = await this._ask(prompt)
 
+    // An inline caller has no way to resume an interrupt, so a missing answer fails closed.
+    if (response === undefined) {
+      return deny(`Tool "${toolName}" denied: approval callback returned no response.`)
+    }
+
     if (!isNegated && this._enableTrust && this._evaluateTrust(response)) {
       this._trustTool(event, toolName)
       return proceed()
     }
 
-    return this._decideAskResponse(toolName, prompt, response)
+    return this._decideAskResponse(toolName, response)
   }
 
   /** Decides on the answer the human just gave, without consulting stored interrupt responses. */
-  private _decideAskResponse(toolName: string, prompt: string, response: JSONValue): InterventionAction {
+  private _decideAskResponse(toolName: string, response: JSONValue): InterventionAction {
     const evaluateResponse = this._evaluate ?? defaultEvaluate
-    if (response === undefined) {
-      return confirm(prompt, { evaluate: evaluateResponse })
-    }
-    return evaluateResponse(response) ? proceed() : deny(`Tool "${toolName}" denied: ${prompt}`)
+    return evaluateResponse(response) ? proceed() : deny(`Tool "${toolName}" denied: the human rejected the call.`)
   }
 
   /**

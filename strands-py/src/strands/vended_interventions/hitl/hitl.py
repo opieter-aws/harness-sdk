@@ -269,14 +269,13 @@ class HumanInTheLoop(InterventionHandler):
             self._trust_tool(event, tool_name)
             return Proceed()
 
-        return self._decide_ask_response(tool_name, prompt, response)
+        return self._decide_ask_response(tool_name, response)
 
-    def _decide_ask_response(self, tool_name: str, prompt: str, response: Any) -> InterventionAction:
+    def _decide_ask_response(self, tool_name: str, response: Any) -> InterventionAction:
         """Decide on the answer the human just gave, without consulting stored interrupt responses.
 
         Args:
             tool_name: Name of the tool awaiting approval.
-            prompt: The approval prompt shown to the human.
             response: The human's answer from the inline ``ask`` callback.
 
         Returns:
@@ -284,7 +283,7 @@ class HumanInTheLoop(InterventionHandler):
         """
         if self._evaluate(response):
             return Proceed()
-        return Deny(reason=f'Tool "{tool_name}" denied: {prompt}')
+        return Deny(reason=f'Tool "{tool_name}" denied: the human rejected the call.')
 
     async def _requires_approval(self, event: BeforeToolCallEvent) -> ClassifierResult:
         """Decide whether the tool call needs human approval.

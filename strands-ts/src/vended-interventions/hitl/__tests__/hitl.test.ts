@@ -9,7 +9,6 @@ import { createMockTool } from '../../../__fixtures__/tool-helpers.js'
 import { InvocationContextImpl } from '../../../agent/invocation-context.js'
 import { BeforeToolCallEvent } from '../../../hooks/events.js'
 import { SNAPSHOT_SCHEMA_VERSION } from '../../../types/snapshot.js'
-import { InterruptResponseContent } from '../../../types/interrupt.js'
 import type { DecisionInput, DecisionResult, Question } from '../../../decisions/types.js'
 
 class StubDecisionModel extends DecisionModel {
@@ -544,8 +543,23 @@ describe('HumanInTheLoop', () => {
     })
   })
 
-  describe('ask callback without an answer', () => {
-    it('pauses and applies the resume answer', async () => {
+  describe('inline ask denials', () => {
+    function toolResultText(agent: Agent): string | undefined {
+      for (const message of agent.messages) {
+        for (const block of message.content) {
+          if (block.type === 'toolResultBlock') {
+            const text = block.content.find((item) => item.type === 'textBlock')
+            return text?.type === 'textBlock' ? text.text : undefined
+          }
+        }
+      }
+      return undefined
+    }
+
+    it.each([
+      ['rejects the call', 'n', 'DENIED: Tool "myTool" denied: the human rejected the call.'],
+      ['returns no answer', undefined, 'DENIED: Tool "myTool" denied: approval callback returned no response.'],
+    ])('denies without pausing when the human %s', async (_label, answer, expectedResult) => {
       let toolExecuted = false
 
       const model = new MockMessageModel()
@@ -560,18 +574,14 @@ describe('HumanInTheLoop', () => {
       const agent = new Agent({
         model,
         tools: [tool],
-        interventions: [new HumanInTheLoop({ ask: async () => undefined as unknown as string })],
+        interventions: [new HumanInTheLoop({ ask: async () => answer as unknown as string })],
         printer: false,
       })
 
-      const interrupted = await agent.invoke('Run tool')
-      expect(interrupted.stopReason).toBe('interrupt')
-
-      const result = await agent.invoke([
-        new InterruptResponseContent({ interruptId: interrupted.interrupts![0]!.id, response: 'y' }),
-      ])
+      const result = await agent.invoke('Run tool')
       expect(result.stopReason).toBe('endTurn')
-      expect(toolExecuted).toBe(true)
+      expect(toolExecuted).toBe(false)
+      expect(toolResultText(agent)).toBe(expectedResult)
     })
   })
 

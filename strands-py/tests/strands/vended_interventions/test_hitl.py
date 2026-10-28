@@ -155,6 +155,29 @@ class TestInlineAskMode:
         assert result.stop_reason == "end_turn"
         assert executed == []
 
+    @pytest.mark.parametrize(
+        ("answer", "expected_result"),
+        [
+            ("n", 'DENIED: Tool "my_tool" denied: the human rejected the call.'),
+            (None, 'DENIED: Tool "my_tool" denied: approval callback returned no response.'),
+        ],
+        ids=["rejected", "no_answer"],
+    )
+    def test_inline_denial_tells_the_model_why(self, answer, expected_result):
+        @tool(name="my_tool")
+        def my_tool() -> str:
+            return "executed"
+
+        model = MockedModelProvider([tool_use_message("my_tool"), text_message("Understood")])
+        agent = Agent(model=model, tools=[my_tool], interventions=[HumanInTheLoop(ask=lambda prompt: answer)])
+
+        agent("Run tool")
+
+        tool_results = [
+            block["toolResult"] for message in agent.messages for block in message["content"] if "toolResult" in block
+        ]
+        assert tool_results[0]["content"][0]["text"] == expected_result
+
     def test_async_ask_returning_none_denies_instead_of_pausing(self):
         # Same fail-closed contract as the sync case, on the awaited async-ask branch.
         executed = []
