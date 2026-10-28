@@ -1543,6 +1543,7 @@ export class Agent implements LocalAgent, InvokableAgent {
    *
    * @param snapshot - The snapshot to restore from
    * @throws Error if `snapshot.schemaVersion` is incompatible or scope is wrong
+   * @throws SessionError if the snapshot's interrupt state carries a malformed pending tool execution
    *
    * @example
    * ```typescript

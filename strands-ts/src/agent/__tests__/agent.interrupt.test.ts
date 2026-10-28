@@ -12,8 +12,14 @@ import {
 } from '../../hooks/events.js'
 import { FunctionTool } from '../../tools/function-tool.js'
 import { InterruptResponseContent } from '../../types/interrupt.js'
-import type { InterruptState, PendingToolExecution } from '../../interrupt.js'
+import type { InterruptState, InterruptStateData, PendingToolExecution } from '../../interrupt.js'
 import { anyTrackingId } from '../../__fixtures__/message-helpers.js'
+import { MockSnapshotStorage } from '../../__fixtures__/mock-storage-provider.js'
+import { SessionManager } from '../../session/session-manager.js'
+import { SNAPSHOT_SCHEMA_VERSION } from '../../types/snapshot.js'
+import type { Snapshot } from '../../types/snapshot.js'
+import type { JSONValue } from '../../types/json.js'
+import type { Tool } from '../../tools/tool.js'
 
 /** Access the agent's internal interrupt state for test assertions. */
 function getPendingToolExecution(agent: Agent): PendingToolExecution | undefined {
@@ -1169,8 +1175,130 @@ describe('Agent interrupt system', () => {
       })
 
       const result = await agent.invoke('anything new')
-      expect(toolRuns).toBe(1)
+      expect(toolRuns).toBe(0)
+      expect(model.callCount).toBe(2)
       expect(result.stopReason).toBe('endTurn')
+    })
+  })
+
+  describe('restored interrupt state', () => {
+    async function createAgentFromSession(
+      interrupts: InterruptStateData,
+      model: MockMessageModel,
+      tool: Tool
+    ): Promise<Agent> {
+      const storage = new MockSnapshotStorage()
+      await storage.saveSnapshot({
+        location: { sessionId: 'restored-session', scope: 'agent', scopeId: 'agent-1' },
+        snapshotId: 'latest',
+        isLatest: true,
+        snapshot: {
+          scope: 'agent',
+          schemaVersion: SNAPSHOT_SCHEMA_VERSION,
+          createdAt: new Date().toISOString(),
+          data: { messages: [], interrupts: interrupts as unknown as JSONValue },
+          appData: {},
+        },
+      })
+      const sessionManager = new SessionManager({ sessionId: 'restored-session', storage: { snapshot: storage } })
+      return new Agent({ id: 'agent-1', model, tools: [tool], sessionManager, printer: false })
+    }
+
+    /** Interrupts an approval-gated tool call, then loads a JSON round-trip of the session snapshot into a fresh agent. */
+    async function interruptAndRestore(): Promise<{
+      restoredAgent: Agent
+      resumeModel: MockMessageModel
+      interruptId: string
+      toolInvocations: string[]
+    }> {
+      const toolInvocations: string[] = []
+      const tool = createMockTool('deleteTool', (context) => {
+        toolInvocations.push(context.toolUse.toolUseId)
+        return 'deleted'
+      })
+      const approvalGate = (event: BeforeToolCallEvent): void => {
+        const approval = event.interrupt<string>({ name: 'approve_delete', reason: 'Confirm delete?' })
+        if (approval !== 'yes') {
+          event.cancel = 'not approved'
+        }
+      }
+
+      const interruptModel = new MockMessageModel()
+        .addTurn({ type: 'toolUseBlock', name: 'deleteTool', toolUseId: 'tool-1', input: { key: 'X' } })
+        .addTurn({ type: 'textBlock', text: 'Unused' })
+      const interruptedAgent = new Agent({ model: interruptModel, tools: [tool], printer: false })
+      interruptedAgent.addHook(BeforeToolCallEvent, approvalGate)
+      const interruptResult = await interruptedAgent.invoke('Delete X')
+      expect(interruptResult.stopReason).toBe('interrupt')
+
+      const snapshot = JSON.parse(JSON.stringify(interruptedAgent.takeSnapshot({ preset: 'session' }))) as Snapshot
+      const resumeModel = new MockMessageModel()
+        .addTurn({ type: 'textBlock', text: 'Deleted' })
+        .addTurn({ type: 'textBlock', text: 'Unused' })
+      const restoredAgent = new Agent({ model: resumeModel, tools: [tool], printer: false })
+      restoredAgent.addHook(BeforeToolCallEvent, approvalGate)
+      restoredAgent.loadSnapshot(snapshot)
+
+      return { restoredAgent, resumeModel, interruptId: interruptResult.interrupts![0]!.id, toolInvocations }
+    }
+
+    it('ignores a restored pending tool execution when the interrupt state is not activated', async () => {
+      const model = new MockMessageModel()
+        .addTurn({ type: 'textBlock', text: 'Hello back' })
+        .addTurn({ type: 'textBlock', text: 'Unused' })
+      const toolInvocations: string[] = []
+      const tool = createMockTool('recordTool', (context) => {
+        toolInvocations.push(context.toolUse.toolUseId)
+        return 'recorded'
+      })
+      const agent = await createAgentFromSession(
+        {
+          interrupts: {},
+          activated: false,
+          pendingToolExecution: {
+            assistantMessageData: {
+              role: 'assistant',
+              content: [{ toolUse: { name: 'recordTool', toolUseId: 'tool-1', input: {} } }],
+            },
+            completedToolResults: {},
+          },
+        },
+        model,
+        tool
+      )
+
+      const result = await agent.invoke('Hello')
+
+      expect(result.stopReason).toBe('endTurn')
+      expect(model.callCount).toBe(1)
+      expect(toolInvocations).toEqual([])
+    })
+
+    it('resumes a pending tool execution restored from a snapshot after an interrupt response', async () => {
+      const { restoredAgent, resumeModel, interruptId, toolInvocations } = await interruptAndRestore()
+
+      const result = await restoredAgent.invoke([new InterruptResponseContent({ interruptId, response: 'yes' })])
+
+      expect(result.stopReason).toBe('endTurn')
+      expect(toolInvocations).toEqual(['tool-1'])
+      expect(resumeModel.callCount).toBe(1)
+      expect(restoredAgent.messages[2]!.content).toMatchObject([
+        {
+          type: 'toolResultBlock',
+          toolUseId: 'tool-1',
+          status: 'success',
+          content: [{ type: 'textBlock', text: 'deleted' }],
+        },
+      ])
+    })
+
+    it('throws TypeError when a restored activated interrupt state receives a new prompt', async () => {
+      const { restoredAgent, resumeModel, toolInvocations } = await interruptAndRestore()
+
+      await expect(restoredAgent.invoke('Something else')).rejects.toThrow(TypeError)
+      await expect(restoredAgent.invoke('Something else')).rejects.toThrow('Agent is in an interrupted state')
+      expect(toolInvocations).toEqual([])
+      expect(resumeModel.callCount).toBe(0)
     })
   })
 })
