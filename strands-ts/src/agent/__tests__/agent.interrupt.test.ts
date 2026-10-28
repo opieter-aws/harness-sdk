@@ -3,13 +3,7 @@ import { Agent } from '../agent.js'
 import { MockMessageModel } from '../../__fixtures__/mock-message-model.js'
 import { createMockTool } from '../../__fixtures__/tool-helpers.js'
 import { TextBlock, ToolResultBlock, ToolUseBlock } from '../../types/messages.js'
-import {
-  AfterToolCallEvent,
-  BeforeToolCallEvent,
-  BeforeToolsEvent,
-  InterruptEvent,
-  MessageAddedEvent,
-} from '../../hooks/events.js'
+import { AfterToolCallEvent, BeforeToolCallEvent, BeforeToolsEvent, InterruptEvent } from '../../hooks/events.js'
 import { FunctionTool } from '../../tools/function-tool.js'
 import { InterruptResponseContent } from '../../types/interrupt.js'
 import type { InterruptState, InterruptStateData, PendingToolExecution } from '../../interrupt.js'
@@ -1145,39 +1139,74 @@ describe('Agent interrupt system', () => {
   })
 
   describe('stream break at InterruptEvent', () => {
-    it('does not replay a stored tool cycle when the stream is broken at InterruptEvent', async () => {
-      const model = new MockMessageModel()
+    /** HITL streaming consumer: stops consuming once the interrupt surfaces and returns its id. */
+    async function streamUntilInterrupt(agent: Agent, prompt: string): Promise<string> {
+      for await (const event of agent.stream(prompt)) {
+        if (event instanceof InterruptEvent) return event.interrupt.id
+      }
+      throw new Error('stream ended without an InterruptEvent')
+    }
+
+    function createModel(): MockMessageModel {
+      return new MockMessageModel()
         .addTurn({ type: 'toolUseBlock', name: 'deleteFiles', toolUseId: 'tool-1', input: {} })
         .addTurn({ type: 'textBlock', text: 'Done' })
-        .addTurn({ type: 'textBlock', text: 'Second' })
+    }
 
-      let raised = false
-      let toolRuns = 0
+    it('rejects a new prompt instead of replaying the stored tool cycle', async () => {
+      const model = createModel()
+      const toolRuns: string[] = []
       const tool = createMockTool('deleteFiles', (context) => {
-        if (!raised) {
-          raised = true
-          context.interrupt({ name: 'confirm', reason: 'Delete?' })
-        }
-        toolRuns += 1
+        toolRuns.push(context.interrupt<string>({ name: 'confirm', reason: 'Delete?' }))
         return 'deleted'
       })
-
       const agent = new Agent({ model, tools: [tool], printer: false })
+      await streamUntilInterrupt(agent, 'Delete old files')
 
-      // HITL streaming consumer: stop consuming once the interrupt surfaces.
-      for await (const event of agent.stream('Delete old files')) {
-        if (event instanceof InterruptEvent) break
-      }
+      await expect(agent.invoke('anything new')).rejects.toThrow(
+        new TypeError('Agent is in an interrupted state. Resume by invoking with interruptResponse content blocks.')
+      )
+      expect(toolRuns).toEqual([])
+      expect(model.callCount).toBe(1)
+    })
 
-      // Kill switch to prevent infinite replay if the bug regresses.
-      agent.addHook(MessageAddedEvent, () => {
-        if (agent.messages.length > 30) agent.cancel()
+    it('runs a tool-approved call once when resumed', async () => {
+      const model = createModel()
+      const toolRuns: string[] = []
+      const tool = createMockTool('deleteFiles', (context) => {
+        toolRuns.push(context.interrupt<string>({ name: 'confirm', reason: 'Delete?' }))
+        return 'deleted'
       })
+      const agent = new Agent({ model, tools: [tool], printer: false })
+      const interruptId = await streamUntilInterrupt(agent, 'Delete old files')
 
-      const result = await agent.invoke('anything new')
-      expect(toolRuns).toBe(0)
-      expect(model.callCount).toBe(2)
+      const result = await agent.invoke([new InterruptResponseContent({ interruptId, response: 'yes' })])
+
       expect(result.stopReason).toBe('endTurn')
+      expect(toolRuns).toEqual(['yes'])
+      expect(model.callCount).toBe(2)
+    })
+
+    it('runs a hook-approved call once when resumed', async () => {
+      const model = createModel()
+      const toolRuns: string[] = []
+      const tool = createMockTool('deleteFiles', (context) => {
+        toolRuns.push(context.toolUse.toolUseId)
+        return 'deleted'
+      })
+      const agent = new Agent({ model, tools: [tool], printer: false })
+      agent.addHook(BeforeToolCallEvent, (event) => {
+        if (event.interrupt<string>({ name: 'approve_delete', reason: 'Delete?' }) !== 'yes') {
+          event.cancel = 'not approved'
+        }
+      })
+      const interruptId = await streamUntilInterrupt(agent, 'Delete old files')
+
+      const result = await agent.invoke([new InterruptResponseContent({ interruptId, response: 'yes' })])
+
+      expect(result.stopReason).toBe('endTurn')
+      expect(toolRuns).toEqual(['tool-1'])
+      expect(model.callCount).toBe(2)
     })
   })
 
